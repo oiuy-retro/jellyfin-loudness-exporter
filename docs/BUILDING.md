@@ -36,3 +36,7 @@ dotnet publish src/JellyfinLoudnessExporter/JellyfinLoudnessExporter.csproj -c R
 
 - Do not commit `bin/`, `obj/`, `dist/`, or any `.exe` / `.dll` artifacts.
 - Do not put API tokens or real library roots into tracked config files.
+
+## License
+
+MIT. See LICENSE. Unicode CaseFolding data: see THIRD_PARTY.md.

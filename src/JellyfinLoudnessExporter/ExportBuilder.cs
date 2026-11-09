@@ -7,13 +7,13 @@ internal sealed class ExportBuilder
 
     private readonly List<RootMapping> _roots;
     private readonly bool _partial;
-    private readonly string _serverVersion;
+    private readonly string? _serverVersion; // null => omit field
     private readonly bool _includeLufsReferenceHint;
 
     public ExportBuilder(
         List<RootMapping> roots,
         bool partial,
-        string serverVersion,
+        string? serverVersion,
         bool includeLufsReferenceHint)
     {
         _roots = roots;
@@ -25,11 +25,11 @@ internal sealed class ExportBuilder
     public ExportBuildResult Build(IReadOnlyList<SourceItem> items)
     {
         var coverage = new ExportCoverage { Partial = _partial };
-        var pending = new Dictionary<string, PendingTrack>(StringComparer.Ordinal);
-        var collisionKeys = new HashSet<string>(StringComparer.Ordinal);
-        var blockedKeys = new HashSet<string>(StringComparer.Ordinal);
-
         coverage.ItemsSeen = items.Count;
+
+        var mapped = new List<MappedCandidate>();
+        var hardFail = false;
+        string? failCode = null;
 
         foreach (var item in items)
         {
@@ -37,140 +37,108 @@ internal sealed class ExportBuilder
             {
                 coverage.Rejected++;
                 AddError(coverage, "missing_item_id", null);
-                if (!_partial)
-                {
-                    return ExportBuildResult.Failed(coverage, "missing_item_id");
-                }
-
+                if (!_partial) { hardFail = true; failCode = "missing_item_id"; break; }
                 continue;
             }
 
-            if (!IsUsableGain(item.NormalizationGain, out var trackGain, out var trackGainBad))
+            // Gains: invalid type / nonfinite => rejected (partial can skip item)
+            if (item.TrackGainStatus == GainStatus.InvalidType || item.AlbumGainStatus == GainStatus.InvalidType)
             {
-                if (trackGainBad == GainBadness.NonFinite)
-                {
-                    coverage.Rejected++;
-                    AddError(coverage, "nonfinite_track_gain", item.Id);
-                    if (!_partial)
-                    {
-                        return ExportBuildResult.Failed(coverage, "nonfinite_track_gain");
-                    }
-
-                    continue;
-                }
+                coverage.Rejected++;
+                AddError(coverage, "invalid_gain_type", item.Id);
+                if (!_partial) { hardFail = true; failCode = "invalid_gain_type"; break; }
+                continue;
             }
 
-            if (!IsUsableGain(item.AlbumNormalizationGain, out var albumGain, out var albumGainBad))
+            if (item.TrackGainStatus == GainStatus.NonFinite || item.AlbumGainStatus == GainStatus.NonFinite)
             {
-                if (albumGainBad == GainBadness.NonFinite)
-                {
-                    coverage.Rejected++;
-                    AddError(coverage, "nonfinite_album_gain", item.Id);
-                    if (!_partial)
-                    {
-                        return ExportBuildResult.Failed(coverage, "nonfinite_album_gain");
-                    }
-
-                    continue;
-                }
+                coverage.Rejected++;
+                AddError(coverage, "nonfinite_gain", item.Id);
+                if (!_partial) { hardFail = true; failCode = "nonfinite_gain"; break; }
+                continue;
             }
 
             var map = PathMapper.MapPath(item.Path, _roots);
             switch (map.Status)
             {
                 case MapStatus.Ok:
+                    mapped.Add(new MappedCandidate
+                    {
+                        Item = item,
+                        RootId = map.RootId!,
+                        RelativePath = map.RelativePath!,
+                        CollisionKey = map.CollisionKey!,
+                        TrackGain = item.TrackGainStatus == GainStatus.Finite ? item.NormalizationGain : null,
+                        AlbumGain = item.AlbumGainStatus == GainStatus.Finite ? item.AlbumNormalizationGain : null
+                    });
                     break;
                 case MapStatus.Unmatched:
                     coverage.Unmatched++;
                     AddError(coverage, "unmatched_root", item.Id);
-                    if (!_partial)
-                    {
-                        return ExportBuildResult.Failed(coverage, "unmatched_root");
-                    }
-
-                    continue;
+                    if (!_partial) { hardFail = true; failCode = "unmatched_root"; }
+                    break;
                 case MapStatus.AmbiguousRoot:
                     coverage.Rejected++;
                     AddError(coverage, "ambiguous_root", item.Id);
-                    if (!_partial)
-                    {
-                        return ExportBuildResult.Failed(coverage, "ambiguous_root");
-                    }
-
-                    continue;
+                    if (!_partial) { hardFail = true; failCode = "ambiguous_root"; }
+                    break;
                 default:
                     coverage.Rejected++;
                     AddError(coverage, map.ErrorCode ?? "invalid_relative", item.Id);
-                    if (!_partial)
-                    {
-                        return ExportBuildResult.Failed(coverage, map.ErrorCode ?? "invalid_relative");
-                    }
-
-                    continue;
+                    if (!_partial) { hardFail = true; failCode = map.ErrorCode ?? "invalid_relative"; }
+                    break;
             }
 
-            var key = map.CollisionKey!;
-            if (blockedKeys.Contains(key))
-            {
-                coverage.Collisions++;
-                AddError(coverage, "collision", item.Id);
-                continue;
-            }
+            if (hardFail) break;
+        }
 
-            if (pending.ContainsKey(key) || !collisionKeys.Add(key))
+        if (hardFail)
+        {
+            return ExportBuildResult.Failed(coverage, failCode ?? "complete_mode_blocked");
+        }
+
+        // Order-independent collisions: group by collision key.
+        var groups = mapped.GroupBy(m => m.CollisionKey, StringComparer.Ordinal);
+        var exported = new List<MappedCandidate>();
+        foreach (var g in groups)
+        {
+            var list = g.ToList();
+            if (list.Count == 1)
             {
-                // First collision for this key: remove any pending entry; never emit either.
-                if (pending.Remove(key))
+                exported.Add(list[0]);
+            }
+            else
+            {
+                // collisions = total colliding source items (all members)
+                coverage.Collisions += list.Count;
+                foreach (var c in list)
                 {
-                    coverage.Collisions++;
+                    AddError(coverage, "collision", c.Item.Id);
                 }
-
-                coverage.Collisions++;
-                blockedKeys.Add(key);
-                collisionKeys.Remove(key);
-                AddError(coverage, "collision", item.Id);
-                if (!_partial)
-                {
-                    return ExportBuildResult.Failed(coverage, "collision");
-                }
-
-                continue;
             }
+        }
 
-            if (trackGain is null)
-            {
-                coverage.MissingTrackGain++;
-            }
+        if (!_partial && coverage.Collisions > 0)
+        {
+            return ExportBuildResult.Failed(coverage, "collision");
+        }
 
-            if (albumGain is null)
-            {
-                coverage.MissingAlbumGain++;
-            }
+        if (!_partial && (coverage.Unmatched > 0 || coverage.Rejected > 0))
+        {
+            return ExportBuildResult.Failed(coverage, "complete_mode_blocked");
+        }
 
-            if (trackGain is null && albumGain is null)
-            {
-                coverage.MissingBothGains++;
-            }
-
-            if (trackGainBad == GainBadness.OutOfRange || albumGainBad == GainBadness.OutOfRange)
+        // missing / out-of-range ONLY on final exported tracks
+        foreach (var e in exported)
+        {
+            if (e.TrackGain is null) coverage.MissingTrackGain++;
+            if (e.AlbumGain is null) coverage.MissingAlbumGain++;
+            if (e.TrackGain is null && e.AlbumGain is null) coverage.MissingBothGains++;
+            if ((e.TrackGain is double tg && GainParser.IsOutOfRange(tg)) ||
+                (e.AlbumGain is double ag && GainParser.IsOutOfRange(ag)))
             {
                 coverage.OutOfRangeGains++;
             }
-
-            pending[key] = new PendingTrack
-            {
-                RootId = map.RootId!,
-                RelativePath = map.RelativePath!,
-                SourceItemId = item.Id,
-                SourceAlbumId = string.IsNullOrWhiteSpace(item.AlbumId) ? null : item.AlbumId,
-                TrackGainDb = trackGain,
-                AlbumGainDb = albumGain
-            };
-        }
-
-        if (!_partial && (coverage.Collisions > 0 || coverage.Unmatched > 0 || coverage.Rejected > 0))
-        {
-            return ExportBuildResult.Failed(coverage, "complete_mode_blocked");
         }
 
         var doc = new ExportDocument
@@ -178,6 +146,14 @@ internal sealed class ExportBuilder
             Format = "jellyfin-loudness-export",
             SchemaVersion = 1,
             ExportedAt = DateTime.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'"),
+            CollisionKeyAlgorithm = UnicodeCaseFold.AlgorithmId,
+            CollisionKey = new CollisionKeyInfo
+            {
+                CaseFold = UnicodeCaseFold.CaseFoldSpec,
+                Nfc = UnicodeCaseFold.NfcSpec,
+                RootId = "ordinal-exact",
+                RelativePath = "NFC(runtime) then unicode-15.1 full C+F case fold; stored relativePath unchanged"
+            },
             Source = new ExportSource
             {
                 Kind = "jellyfin-api",
@@ -187,26 +163,23 @@ internal sealed class ExportBuilder
                 LufsDerivedReferenceLufs = _includeLufsReferenceHint ? InformationalLufsReference : null
             },
             Roots = _roots.Select(r => new ExportRoot { Id = r.Id }).ToList(),
-            Tracks = pending.Values
+            Tracks = exported
                 .OrderBy(t => t.RootId, StringComparer.Ordinal)
                 .ThenBy(t => t.RelativePath, StringComparer.Ordinal)
                 .Select(t => new ExportTrack
                 {
                     RootId = t.RootId,
                     RelativePath = t.RelativePath,
-                    SourceItemId = t.SourceItemId,
-                    SourceAlbumId = t.SourceAlbumId,
-                    TrackGainDb = t.TrackGainDb,
-                    AlbumGainDb = t.AlbumGainDb
+                    SourceItemId = t.Item.Id,
+                    SourceAlbumId = string.IsNullOrWhiteSpace(t.Item.AlbumId) ? null : t.Item.AlbumId,
+                    TrackGainDb = t.TrackGain,
+                    AlbumGainDb = t.AlbumGain
                 })
                 .ToList(),
             Coverage = coverage
         };
 
         coverage.EntriesExported = doc.Tracks.Count;
-        coverage.Partial = _partial && (coverage.Collisions > 0 || coverage.Unmatched > 0 || coverage.Rejected > 0 || _partial);
-        // Explicit: partial flag is true only when --partial was requested AND export is produced.
-        // Requirements: coverage.partial bool — set true when running in partial mode.
         coverage.Partial = _partial;
 
         return ExportBuildResult.Ok(doc);
@@ -214,61 +187,18 @@ internal sealed class ExportBuilder
 
     private static void AddError(ExportCoverage coverage, string code, string? sourceItemId)
     {
-        if (coverage.Errors.Count >= 200)
-        {
-            return;
-        }
-
-        coverage.Errors.Add(new ExportError
-        {
-            Code = code,
-            SourceItemId = sourceItemId
-        });
+        if (coverage.Errors.Count >= 200) return;
+        coverage.Errors.Add(new ExportError { Code = code, SourceItemId = sourceItemId });
     }
 
-    private enum GainBadness
+    private sealed class MappedCandidate
     {
-        None,
-        Missing,
-        NonFinite,
-        OutOfRange
-    }
-
-    private static bool IsUsableGain(double? raw, out double? value, out GainBadness badness)
-    {
-        value = null;
-        if (raw is null)
-        {
-            badness = GainBadness.Missing;
-            return true;
-        }
-
-        var v = raw.Value;
-        if (double.IsNaN(v) || double.IsInfinity(v))
-        {
-            badness = GainBadness.NonFinite;
-            return false;
-        }
-
-        value = v;
-        if (Math.Abs(v) > OutOfRangeAbsDb)
-        {
-            badness = GainBadness.OutOfRange;
-            return true;
-        }
-
-        badness = GainBadness.None;
-        return true;
-    }
-
-    private sealed class PendingTrack
-    {
+        public required SourceItem Item { get; init; }
         public required string RootId { get; init; }
         public required string RelativePath { get; init; }
-        public required string SourceItemId { get; init; }
-        public string? SourceAlbumId { get; init; }
-        public double? TrackGainDb { get; init; }
-        public double? AlbumGainDb { get; init; }
+        public required string CollisionKey { get; init; }
+        public double? TrackGain { get; init; }
+        public double? AlbumGain { get; init; }
     }
 }
 
@@ -292,4 +222,12 @@ internal sealed class ExportBuildResult
         Coverage = coverage,
         FailureCode = code
     };
+}
+
+internal enum GainStatus
+{
+    Missing,
+    Finite,
+    NonFinite,
+    InvalidType
 }

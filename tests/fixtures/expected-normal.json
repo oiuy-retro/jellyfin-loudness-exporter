@@ -2,6 +2,7 @@
   "SYNTHETIC": true,
   "format": "jellyfin-loudness-export",
   "schemaVersion": 1,
+  "collisionKeyAlgorithm": "jf-ck-v1",
   "source": {
     "kind": "jellyfin-api",
     "gainOrigin": "lufs-or-replaygain-unspecified",

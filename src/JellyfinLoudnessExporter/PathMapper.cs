@@ -1,33 +1,37 @@
-using System.Globalization;
 using System.Text;
 
 namespace JellyfinLoudnessExporter;
 
 internal static class PathMapper
 {
+    // Windows-invalid filename characters (excluding separators handled separately).
+    private static readonly char[] InvalidFileChars = ['<', '>', '"', '|', '?', '*'];
+
     public static List<RootMapping> ParseRoots(IEnumerable<string> rootArgs)
     {
         var roots = new List<RootMapping>();
-        var ids = new HashSet<string>(StringComparer.Ordinal);
+        var ids = new HashSet<string>(StringComparer.Ordinal); // exact ordinal — case-sensitive IDs
 
         foreach (var arg in rootArgs)
         {
             var eq = arg.IndexOf('=');
             if (eq <= 0 || eq == arg.Length - 1)
             {
-                throw new ArgumentException($"Root must be id=WindowsPath, got: {SanitizeForMessage(arg)}");
+                throw new SafeErrorException(SafeError.Category.Usage, "root_format");
             }
 
-            var id = arg[..eq].Trim();
-            var path = arg[(eq + 1)..].Trim();
-            if (string.IsNullOrWhiteSpace(id))
+            var id = arg[..eq]; // do not trim id beyond exact token — but allow trim of whitespace-only mistakes
+            id = id.Trim();
+            var path = arg[(eq + 1)..]; // do NOT Trim the Windows path (trailing space is invalid and must fail closed)
+
+            if (string.IsNullOrEmpty(id))
             {
-                throw new ArgumentException("Root id must be non-empty.");
+                throw new SafeErrorException(SafeError.Category.Usage, "root_id_empty");
             }
 
             if (!ids.Add(id))
             {
-                throw new ArgumentException($"Duplicate root id: {id}");
+                throw new SafeErrorException(SafeError.Category.Usage, "root_id_duplicate");
             }
 
             ValidateRootId(id);
@@ -42,7 +46,7 @@ internal static class PathMapper
 
         if (roots.Count == 0)
         {
-            throw new ArgumentException("At least one root is required (example: music=C:\\Music).");
+            throw new SafeErrorException(SafeError.Category.Usage, "root_required");
         }
 
         DetectOverlappingRoots(roots);
@@ -53,50 +57,121 @@ internal static class PathMapper
     {
         if (id.Length > 64)
         {
-            throw new ArgumentException("Root id is too long.");
+            throw new SafeErrorException(SafeError.Category.Usage, "root_id_too_long");
         }
 
         foreach (var c in id)
         {
             if (!(char.IsAsciiLetterOrDigit(c) || c is '-' or '_'))
             {
-                throw new ArgumentException($"Root id contains invalid character: {id}");
+                throw new SafeErrorException(SafeError.Category.Usage, "root_id_invalid_char");
             }
         }
     }
 
     public static string NormalizeWindowsAbsoluteRoot(string path)
     {
-        if (string.IsNullOrWhiteSpace(path))
+        // Do not Trim — trailing spaces/dots are invalid Windows segments and must fail closed.
+        if (string.IsNullOrEmpty(path))
         {
-            throw new ArgumentException("Root path is empty.");
+            throw new SafeErrorException(SafeError.Category.Usage, "root_path_empty");
         }
 
         if (path.Contains('\0', StringComparison.Ordinal))
         {
-            throw new ArgumentException("Root path contains NUL.");
+            throw new SafeErrorException(SafeError.Category.Usage, "root_path_nul");
         }
 
-        var trimmed = path.Trim().TrimEnd('\\', '/');
-        if (!IsWindowsAbsolute(trimmed))
+        ValidateWindowsPathSyntax(path, isRoot: true);
+
+        // Strip only trailing separators for prefix construction (not spaces/dots).
+        var trimmedSep = path.TrimEnd('\\', '/');
+        if (trimmedSep.Length == 0)
         {
-            throw new ArgumentException("Root path must be a Windows drive or UNC absolute path.");
+            throw new SafeErrorException(SafeError.Category.Usage, "root_path_empty");
         }
 
-        // Boundary-aware prefix uses trailing backslash after normalization to slash form for compare.
-        var unified = UnifySeparators(trimmed);
+        // Preserve drive root form: C: -> C:/  and C:\ -> C:/
+        if (trimmedSep.Length == 2 && char.IsAsciiLetter(trimmedSep[0]) && trimmedSep[1] == ':')
+        {
+            return char.ToUpperInvariant(trimmedSep[0]) + ":/";
+        }
+
+        if (!IsWindowsAbsolute(trimmedSep))
+        {
+            throw new SafeErrorException(SafeError.Category.Usage, "root_not_absolute");
+        }
+
+        // Reject . / .. segments in roots
+        var unifiedCheck = UnifySeparators(trimmedSep);
+        foreach (var seg in SplitSegments(unifiedCheck, isAbsolute: true))
+        {
+            if (seg is "." or "..")
+            {
+                throw new SafeErrorException(SafeError.Category.Usage, "root_dot_segment");
+            }
+        }
+
+        // Reject device namespaces: \\.\ \\?\ \\.\Pipe\ etc.
+        if (IsDeviceNamespace(path))
+        {
+            throw new SafeErrorException(SafeError.Category.Usage, "root_device_namespace");
+        }
+
+        var unified = UnifySeparators(trimmedSep);
+        // Normalize drive letter to upper for stable OrdinalIgnoreCase prefix compare source.
+        if (unified.Length >= 2 && char.IsAsciiLetter(unified[0]) && unified[1] == ':')
+        {
+            unified = char.ToUpperInvariant(unified[0]) + unified[1..];
+        }
+
         return unified.TrimEnd('/') + "/";
+    }
+
+    public static bool IsDeviceNamespace(string path)
+    {
+        // \\.\ or \\?\ or //./ //?/
+        if (path.Length >= 4)
+        {
+            var a = path[0];
+            var b = path[1];
+            var c = path[2];
+            var d = path[3];
+            if ((a == '\\' || a == '/') && (b == '\\' || b == '/') && (c == '.' || c == '?') && (d == '\\' || d == '/'))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public static bool IsWindowsAbsolute(string path)
     {
+        if (IsDeviceNamespace(path))
+        {
+            return false; // treated as forbidden, not a usable root
+        }
+
         if (path.Length >= 3 && char.IsAsciiLetter(path[0]) && path[1] == ':' && (path[2] == '\\' || path[2] == '/'))
         {
             return true;
         }
 
+        // Bare drive root C: or C:\
+        if (path.Length == 2 && char.IsAsciiLetter(path[0]) && path[1] == ':')
+        {
+            return true;
+        }
+
+        if (path.Length == 3 && char.IsAsciiLetter(path[0]) && path[1] == ':' && (path[2] == '\\' || path[2] == '/'))
+        {
+            return true;
+        }
+
         // UNC \\server\share
-        if (path.StartsWith(@"\\", StringComparison.Ordinal) || path.StartsWith("//", StringComparison.Ordinal))
+        if ((path.StartsWith(@"\\", StringComparison.Ordinal) || path.StartsWith("//", StringComparison.Ordinal)) &&
+            !IsDeviceNamespace(path))
         {
             var rest = path.TrimStart('\\', '/');
             var parts = rest.Split(['\\', '/'], StringSplitOptions.RemoveEmptyEntries);
@@ -106,10 +181,7 @@ internal static class PathMapper
         return false;
     }
 
-    public static string UnifySeparators(string path)
-    {
-        return path.Replace('\\', '/');
-    }
+    public static string UnifySeparators(string path) => path.Replace('\\', '/');
 
     public static void DetectOverlappingRoots(IReadOnlyList<RootMapping> roots)
     {
@@ -119,25 +191,22 @@ internal static class PathMapper
             {
                 var a = roots[i].NormalizedPrefix;
                 var b = roots[j].NormalizedPrefix;
-                if (HasPrefixBoundary(a, b) || HasPrefixBoundary(b, a) ||
-                    string.Equals(a, b, StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(a, b, StringComparison.OrdinalIgnoreCase) ||
+                    HasPrefixBoundary(a, b) || HasPrefixBoundary(b, a))
                 {
-                    throw new ArgumentException(
-                        $"Overlapping or identical roots are not allowed: '{roots[i].Id}' and '{roots[j].Id}'.");
+                    throw new SafeErrorException(SafeError.Category.Usage, "root_overlap");
                 }
             }
         }
     }
 
-    private static bool HasPrefixBoundary(string prefixWithSlash, string otherWithSlash)
-    {
-        // prefix C:/Music/ matches C:/Music/Album/ but not C:/MusicBackup/
-        return otherWithSlash.StartsWith(prefixWithSlash, StringComparison.OrdinalIgnoreCase);
-    }
+    private static bool HasPrefixBoundary(string prefixWithSlash, string otherWithSlash) =>
+        otherWithSlash.StartsWith(prefixWithSlash, StringComparison.OrdinalIgnoreCase);
 
     public static MapResult MapPath(string sourcePath, IReadOnlyList<RootMapping> roots)
     {
-        if (string.IsNullOrWhiteSpace(sourcePath))
+        // Do NOT Trim source Path.
+        if (sourcePath.Length == 0)
         {
             return new MapResult { Status = MapStatus.Rejected, ErrorCode = "empty_path" };
         }
@@ -147,12 +216,31 @@ internal static class PathMapper
             return new MapResult { Status = MapStatus.Rejected, ErrorCode = "nul_in_path" };
         }
 
-        if (!IsWindowsAbsolute(sourcePath.Trim()))
+        if (IsDeviceNamespace(sourcePath))
+        {
+            return new MapResult { Status = MapStatus.Rejected, ErrorCode = "device_namespace" };
+        }
+
+        try
+        {
+            ValidateWindowsPathSyntax(sourcePath, isRoot: false);
+        }
+        catch (SafeErrorException)
+        {
+            return new MapResult { Status = MapStatus.Rejected, ErrorCode = "invalid_path_syntax" };
+        }
+
+        if (!IsWindowsAbsolute(sourcePath))
         {
             return new MapResult { Status = MapStatus.Rejected, ErrorCode = "source_not_absolute" };
         }
 
-        var unified = UnifySeparators(sourcePath.Trim());
+        var unified = UnifySeparators(sourcePath);
+        if (unified.Length >= 2 && char.IsAsciiLetter(unified[0]) && unified[1] == ':')
+        {
+            unified = char.ToUpperInvariant(unified[0]) + unified[1..];
+        }
+
         RootMapping? matched = null;
         foreach (var root in roots)
         {
@@ -173,30 +261,49 @@ internal static class PathMapper
             return new MapResult { Status = MapStatus.Unmatched, ErrorCode = "unmatched_root" };
         }
 
-        string relative;
-        var prefix = matched.NormalizedPrefix;
-        if (string.Equals(unified.TrimEnd('/'), prefix.TrimEnd('/'), StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(unified.TrimEnd('/'), matched.NormalizedPrefix.TrimEnd('/'), StringComparison.OrdinalIgnoreCase))
         {
             return new MapResult { Status = MapStatus.InvalidRelative, ErrorCode = "empty_relative" };
         }
 
-        if (!unified.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        if (!unified.StartsWith(matched.NormalizedPrefix, StringComparison.OrdinalIgnoreCase))
         {
-            // Exact folder match without child — already handled; otherwise fail closed.
             return new MapResult { Status = MapStatus.Unmatched, ErrorCode = "unmatched_root" };
         }
 
-        // Preserve exact case/Unicode from the source path residual (after slash unify only).
-        // Use the source unified string's residual slice so casing of the residual is preserved.
-        // Prefix match was case-insensitive; take residual by length of matched absolute form in source.
-        relative = ExtractRelativePreservingCase(unified, prefix);
+        // Direct slice by prefix length after OrdinalIgnoreCase match (prefix lengths equal in UTF-16 for ASCII drive roots).
+        // For safety, verify character-by-character ignore-case then slice original unified source.
+        var prefix = matched.NormalizedPrefix;
+        if (unified.Length < prefix.Length)
+        {
+            return new MapResult { Status = MapStatus.Rejected, ErrorCode = "prefix_length" };
+        }
+
+        for (var i = 0; i < prefix.Length; i++)
+        {
+            if (!CharEqualsIgnoreCase(unified[i], prefix[i]))
+            {
+                return new MapResult { Status = MapStatus.Rejected, ErrorCode = "prefix_mismatch" };
+            }
+        }
+
+        var relative = unified[prefix.Length..]; // preserve exact residual case/Unicode
         var validation = ValidateRelative(relative);
         if (validation is not null)
         {
             return new MapResult { Status = MapStatus.InvalidRelative, ErrorCode = validation };
         }
 
-        var collisionKey = BuildCollisionKey(matched.Id, relative);
+        string collisionKey;
+        try
+        {
+            collisionKey = UnicodeCaseFold.BuildCollisionKey(matched.Id, relative);
+        }
+        catch (InvalidDataException)
+        {
+            return new MapResult { Status = MapStatus.Rejected, ErrorCode = "malformed_unicode" };
+        }
+
         return new MapResult
         {
             Status = MapStatus.Ok,
@@ -206,31 +313,12 @@ internal static class PathMapper
         };
     }
 
-    internal static string ExtractRelativePreservingCase(string unifiedSource, string normalizedPrefix)
-    {
-        // Find prefix length in a case-insensitive way, then slice original unified source.
-        if (unifiedSource.Length < normalizedPrefix.Length)
-        {
-            throw new InvalidOperationException("Internal path prefix length mismatch.");
-        }
-
-        // Walk comparing ignore-case; require boundary already ensured by caller.
-        for (var i = 0; i < normalizedPrefix.Length; i++)
-        {
-            var a = char.ToLowerInvariant(unifiedSource[i]);
-            var b = char.ToLowerInvariant(normalizedPrefix[i]);
-            if (a != b)
-            {
-                throw new InvalidOperationException("Internal path prefix mismatch.");
-            }
-        }
-
-        return unifiedSource[normalizedPrefix.Length..];
-    }
+    private static bool CharEqualsIgnoreCase(char a, char b) =>
+        a == b || char.ToUpperInvariant(a) == char.ToUpperInvariant(b);
 
     public static string? ValidateRelative(string relative)
     {
-        if (string.IsNullOrEmpty(relative))
+        if (relative.Length == 0)
         {
             return "empty_relative";
         }
@@ -245,13 +333,11 @@ internal static class PathMapper
             return "absolute_residual";
         }
 
-        // Drive residual e.g. C:/...
         if (relative.Length >= 2 && char.IsAsciiLetter(relative[0]) && relative[1] == ':')
         {
             return "drive_residual";
         }
 
-        // UNC residual
         if (relative.StartsWith("//", StringComparison.Ordinal))
         {
             return "unc_residual";
@@ -269,24 +355,109 @@ internal static class PathMapper
             {
                 return "dot_segment";
             }
+
+            if (segment.EndsWith(' ') || segment.EndsWith('.'))
+            {
+                return "trailing_dot_or_space_segment";
+            }
+
+            if (segment.Contains(':', StringComparison.Ordinal))
+            {
+                return "colon_in_segment"; // ADS / alternate stream
+            }
+
+            foreach (var ch in InvalidFileChars)
+            {
+                if (segment.Contains(ch))
+                {
+                    return "invalid_char";
+                }
+            }
         }
 
         return null;
     }
 
-    public static string BuildCollisionKey(string rootId, string relativePath)
+    public static void ValidateWindowsPathSyntax(string path, bool isRoot)
     {
-        var norm = relativePath.Normalize(NormalizationForm.FormC).ToLowerInvariant();
-        return string.Create(CultureInfo.InvariantCulture, $"{rootId.ToLowerInvariant()}\u001f{norm}");
-    }
-
-    public static string SanitizeForMessage(string value)
-    {
-        if (value.Length > 80)
+        if (path.Contains('\0', StringComparison.Ordinal))
         {
-            return value[..80] + "…";
+            throw new SafeErrorException(SafeError.Category.Mapping, "nul_in_path");
         }
 
-        return value;
+        // Repeated separators (except leading UNC //)
+        var unified = UnifySeparators(path);
+        var start = 0;
+        if (unified.StartsWith("//", StringComparison.Ordinal) && !IsDeviceNamespace(path))
+        {
+            start = 2;
+        }
+
+        if (unified.AsSpan(start).Contains("//", StringComparison.Ordinal))
+        {
+            throw new SafeErrorException(SafeError.Category.Mapping, "repeated_separator");
+        }
+
+        foreach (var seg in SplitSegments(unified, isAbsolute: true))
+        {
+            if (seg.Length == 0)
+            {
+                continue;
+            }
+
+            // Drive letter segment like C: at start is ok — handled as absolute
+            if (seg.Length == 2 && char.IsAsciiLetter(seg[0]) && seg[1] == ':')
+            {
+                continue;
+            }
+
+            if (seg.Contains(':', StringComparison.Ordinal))
+            {
+                throw new SafeErrorException(SafeError.Category.Mapping, "colon_in_segment");
+            }
+
+            if (seg.EndsWith(' ') || (seg.EndsWith('.') && seg is not "." and not ".."))
+            {
+                throw new SafeErrorException(SafeError.Category.Mapping, "trailing_dot_or_space_segment");
+            }
+
+            foreach (var ch in InvalidFileChars)
+            {
+                if (seg.Contains(ch))
+                {
+                    throw new SafeErrorException(SafeError.Category.Mapping, "invalid_char");
+                }
+            }
+
+            foreach (var ch in seg)
+            {
+                if (ch < 32)
+                {
+                    throw new SafeErrorException(SafeError.Category.Mapping, "control_char");
+                }
+            }
+        }
+
+        if (isRoot)
+        {
+            foreach (var seg in SplitSegments(UnifySeparators(path.TrimEnd('\\', '/')), isAbsolute: true))
+            {
+                if (seg is "." or "..")
+                {
+                    throw new SafeErrorException(SafeError.Category.Usage, "root_dot_segment");
+                }
+            }
+        }
+    }
+
+    private static IEnumerable<string> SplitSegments(string unified, bool isAbsolute)
+    {
+        var s = unified;
+        if (s.StartsWith("//", StringComparison.Ordinal))
+        {
+            s = s[2..];
+        }
+
+        return s.Split('/', StringSplitOptions.None);
     }
 }

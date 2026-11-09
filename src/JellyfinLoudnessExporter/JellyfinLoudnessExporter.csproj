@@ -14,6 +14,8 @@
 
   <ItemGroup>
     <None Include="..\..\tests\fixtures\**\*" Link="fixtures\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <EmbeddedResource Include="Data\CaseFolding-15.1.0.txt" LogicalName="JellyfinLoudnessExporter.Data.CaseFolding-15.1.0.txt" />
+    <None Include="Data\UNICODE_NOTICE.md" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

@@ -14,50 +14,124 @@ internal static class ExportWriter
         DefaultIgnoreCondition = JsonIgnoreCondition.Never
     };
 
+    /// <summary>
+    /// Write UTF-8 (no BOM) via an exclusively created unique same-directory temp file,
+    /// then replace/move into place. Prior output is preserved if the final replace fails.
+    /// Never uses a predictable ".tmp" sibling name.
+    /// </summary>
     public static void WriteAtomic(ExportDocument document, string outputPath, bool force)
     {
         if (string.IsNullOrWhiteSpace(outputPath))
         {
-            throw new ArgumentException("Output path is required.");
+            throw new SafeErrorException(SafeError.Category.Usage, "Output path is required.");
         }
 
         var full = Path.GetFullPath(outputPath);
+        RefuseSymlink(full, "output");
+
         if (File.Exists(full) && !force)
         {
-            throw new IOException($"Output file already exists (refusing to overwrite without --force): {Path.GetFileName(full)}");
+            throw new SafeErrorException(SafeError.Category.Io, "Output file already exists (use --force to replace).");
         }
 
         var dir = Path.GetDirectoryName(full);
-        if (!string.IsNullOrEmpty(dir))
+        if (string.IsNullOrEmpty(dir))
         {
-            Directory.CreateDirectory(dir);
+            throw new SafeErrorException(SafeError.Category.Io, "Output directory is invalid.");
         }
 
-        var tmp = full + ".tmp";
-        var json = JsonSerializer.Serialize(document, Options);
-        var bytes = Encoding.UTF8.GetBytes(json); // UTF-8 no BOM
+        Directory.CreateDirectory(dir);
 
+        var json = JsonSerializer.Serialize(document, Options);
+        var bytes = Encoding.UTF8.GetBytes(json); // no BOM
+
+        string? tmp = null;
         try
         {
-            File.WriteAllBytes(tmp, bytes);
+            tmp = CreateExclusiveTempFile(dir);
+            RefuseSymlink(tmp, "temp");
+
+            using (var fs = new FileStream(tmp, FileMode.Open, FileAccess.Write, FileShare.None))
+            {
+                fs.Write(bytes, 0, bytes.Length);
+                fs.Flush(flushToDisk: true);
+            }
+
+            // Re-check existence after write (race). Preserve prior file on failure.
             if (File.Exists(full))
             {
                 if (!force)
                 {
-                    throw new IOException("Output file appeared during write; refusing to overwrite.");
+                    throw new SafeErrorException(SafeError.Category.Io, "Output file appeared during write; refusing to overwrite.");
                 }
 
-                File.Delete(full);
+                // Atomic-ish replace: Move with overwrite where supported; never delete-then-move.
+                File.Move(tmp, full, overwrite: true);
+                tmp = null;
             }
-
-            File.Move(tmp, full);
+            else
+            {
+                File.Move(tmp, full);
+                tmp = null;
+            }
+        }
+        catch
+        {
+            // Prior output untouched if we never successfully moved over it.
+            throw;
         }
         finally
         {
-            if (File.Exists(tmp))
+            if (tmp is not null && File.Exists(tmp))
             {
                 try { File.Delete(tmp); } catch { /* best effort */ }
             }
+        }
+    }
+
+    internal static string CreateExclusiveTempFile(string directory)
+    {
+        for (var attempt = 0; attempt < 32; attempt++)
+        {
+            var name = Path.Combine(directory, $".jle-{Guid.NewGuid():N}.tmp");
+            try
+            {
+                using var fs = new FileStream(
+                    name,
+                    FileMode.CreateNew,
+                    FileAccess.Write,
+                    FileShare.None,
+                    bufferSize: 4096,
+                    FileOptions.None);
+                // Owned empty file created exclusively.
+                return name;
+            }
+            catch (IOException)
+            {
+                // collision — retry
+            }
+        }
+
+        throw new SafeErrorException(SafeError.Category.Io, "Could not create exclusive temp file.");
+    }
+
+    private static void RefuseSymlink(string path, string label)
+    {
+        try
+        {
+            var attr = File.GetAttributes(path);
+            if ((attr & FileAttributes.ReparsePoint) != 0)
+            {
+                throw new SafeErrorException(SafeError.Category.Io, $"Refusing to use symlink as {label} path.");
+            }
+        }
+        catch (FileNotFoundException)
+        {
+            // ok — does not exist yet
+        }
+        catch (DirectoryNotFoundException)
+        {
+            // ok
         }
     }
 }

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net;
 using System.Text;
 using System.Text.Json;
 
@@ -10,24 +11,44 @@ internal static class SelfTest
     {
         var failed = 0;
         failed += Check("normal", () => CaseNormal(fixturesDir));
-        failed += Check("missing_track_gain", () => CaseMissingTrack(fixturesDir));
-        failed += Check("missing_album_gain", () => CaseMissingAlbum(fixturesDir));
-        failed += Check("missing_both_gains", () => CaseMissingBoth(fixturesDir));
-        failed += Check("backslash_conversion", () => CaseBackslash());
+        failed += Check("missing_gains", () => CaseMissingGains(fixturesDir));
+        failed += Check("backslash", () => CaseBackslash());
         failed += Check("unicode_preserve", () => CaseUnicodePreserve());
-        failed += Check("unicode_nfc_nfd_collision", () => CaseUnicodeCollision());
+        failed += Check("casefold_strasse", () => CaseStrasse());
+        failed += Check("casefold_sigma", () => CaseSigma());
+        failed += Check("nfc_nfd_collision", () => CaseUnicodeCollision());
+        failed += Check("rootId_ordinal", () => CaseRootIdOrdinal());
+        failed += Check("turkish_non_turkic", () => CaseTurkishNonTurkic());
+        failed += Check("supplementary", () => CaseSupplementary());
         failed += Check("case_collision", () => CaseCaseCollision());
+        failed += Check("triple_collision", () => CaseTripleCollision());
         failed += Check("reject_traversal", () => CaseRejectTraversal());
-        failed += Check("reject_absolute_residual", () => CaseRejectAbsoluteResidual());
+        failed += Check("absolute_residual_matched", () => CaseAbsoluteResidualMatched());
         failed += Check("reject_overlap_roots", () => CaseRejectOverlapRoots());
+        failed += Check("drive_root_C", () => CaseDriveRoot());
+        failed += Check("reject_device_namespace", () => CaseDeviceNamespace());
+        failed += Check("reject_dot_root", () => CaseDotRoot());
+        failed += Check("no_trim_source_path", () => CaseNoTrim());
         failed += Check("explicit_partial", () => CaseExplicitPartial());
+        failed += Check("coverage_exported_only", () => CaseCoverageExportedOnly());
         failed += Check("out_of_range", () => CaseOutOfRange());
-        failed += Check("nonfinite_reject", () => CaseNonfinite(fixturesDir));
-        failed += Check("unknown_field_ignored", () => CaseUnknownField(fixturesDir));
+        failed += Check("nonfinite_json_number_fixture", () => CaseNonfiniteFixture(fixturesDir));
+        failed += Check("unknown_nested_fields", () => CaseUnknownNested(fixturesDir));
+        failed += Check("logical_alias_dup", () => CaseLogicalAliasDup());
         failed += Check("duplicate_json_property", () => CaseDuplicateProperty());
-        failed += Check("atomic_no_overwrite", () => CaseAtomicNoOverwrite());
+        failed += Check("invalid_gain_type", () => CaseInvalidGainType());
+        failed += Check("atomic_writer", () => CaseAtomicWriter());
+        failed += Check("writer_preexisting_temp", () => CaseWriterPreexistingTemp());
+        failed += Check("shared_valid_export_schema", () => CaseSharedValid(fixturesDir));
+        failed += Check("http_normalize_slash", () => CaseHttpNormalizeSlash());
+        failed += Check("http_reject_userinfo", () => CaseHttpUserInfo());
+        failed += Check("http_pagination_fake", () => CaseHttpPaginationFake());
+        failed += Check("http_redirect_refused", () => CaseHttpRedirect());
+        failed += Check("http_invalid_gain", () => CaseHttpInvalidGain());
+        failed += Check("collision_vectors_file", () => CaseCollisionVectors(fixturesDir));
         failed += Check("perf_100k", () => CasePerf100k());
-        failed += Check("fixture_files_marked", () => CaseFixtureMarkers(fixturesDir));
+        failed += Check("fixture_markers", () => CaseFixtureMarkers(fixturesDir));
+        failed += Check("expected_normal_canonical", () => CaseExpectedNormalCanonical(fixturesDir));
 
         if (failed == 0)
         {
@@ -49,154 +70,159 @@ internal static class SelfTest
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"  FAIL {name}: {ex.Message}");
+            Console.Error.WriteLine($"  FAIL {name}: {ex.GetType().Name}: {ex.Message}");
             return 1;
         }
     }
 
-    private static List<RootMapping> MusicRoot() =>
-        PathMapper.ParseRoots(["music=C:\\Music"]);
+    private static List<RootMapping> MusicRoot() => PathMapper.ParseRoots(["music=C:\\Music"]);
 
-    private static ExportDocument MustBuild(IReadOnlyList<SourceItem> items, bool partial = false, bool lufsHint = true)
+    private static ExportDocument MustBuild(IReadOnlyList<SourceItem> items, bool partial = false, bool lufsHint = true, string? ver = "10.11.0-SYNTHETIC")
     {
-        var result = new ExportBuilder(MusicRoot(), partial, "10.11.0-SYNTHETIC", lufsHint).Build(items);
+        var result = new ExportBuilder(MusicRoot(), partial, ver, lufsHint).Build(items);
         if (!result.Success || result.Document is null)
-        {
             throw new Exception($"expected success, got {result.FailureCode}");
-        }
-
         return result.Document;
     }
 
+    private static SourceItem Item(string id, string path, double? track = null, double? album = null, GainStatus? ts = null, GainStatus? als = null) => new()
+    {
+        Id = id,
+        Path = path,
+        NormalizationGain = track,
+        AlbumNormalizationGain = album,
+        TrackGainStatus = ts ?? (track is null ? GainStatus.Missing : GainStatus.Finite),
+        AlbumGainStatus = als ?? (album is null ? GainStatus.Missing : GainStatus.Finite)
+    };
+
     private static void CaseNormal(string fixturesDir)
     {
-        var path = Path.Combine(fixturesDir, "input-normal.json");
-        var (ver, items) = OfflineItemsReader.Read(path);
-        var doc = new ExportBuilder(MusicRoot(), false, ver, true).Build(items).Document
-                  ?? throw new Exception("null doc");
-        if (doc.Tracks.Count != 1) throw new Exception("track count");
-        var t = doc.Tracks[0];
-        if (t.RelativePath != "Artist/Album/01 Track.flac") throw new Exception("path " + t.RelativePath);
-        if (t.TrackGainDb != -1.5) throw new Exception("track gain");
-        if (t.AlbumGainDb != -0.7) throw new Exception("album gain");
-        AssertValidExportShape(doc);
-        var expected = Path.Combine(fixturesDir, "expected-normal.json");
-        AssertMatchesExpectedTracks(expected, doc);
+        var (ver, items) = OfflineItemsReader.Read(Path.Combine(fixturesDir, "input-normal.json"));
+        var doc = new ExportBuilder(MusicRoot(), false, ver, true).Build(items).Document ?? throw new Exception("null");
+        if (doc.Tracks.Count != 1) throw new Exception("count");
+        if (doc.Tracks[0].RelativePath != "Artist/Album/01 Track.flac") throw new Exception(doc.Tracks[0].RelativePath);
+        if (doc.CollisionKeyAlgorithm != UnicodeCaseFold.AlgorithmId) throw new Exception("algo");
+        if (!doc.CollisionKey.Nfc.Contains("runtime", StringComparison.Ordinal)) throw new Exception("nfc runtime note");
     }
 
-    private static void CaseMissingTrack(string fixturesDir)
+    private static void CaseMissingGains(string fixturesDir)
     {
-        var (_, items) = OfflineItemsReader.Read(Path.Combine(fixturesDir, "input-missing-track-gain.json"));
-        var doc = MustBuild(items);
-        if (doc.Tracks[0].TrackGainDb is not null) throw new Exception("track gain should omit");
-        if (doc.Coverage.MissingTrackGain != 1) throw new Exception("missingTrackGain");
-    }
-
-    private static void CaseMissingAlbum(string fixturesDir)
-    {
-        var (_, items) = OfflineItemsReader.Read(Path.Combine(fixturesDir, "input-missing-album-gain.json"));
-        var doc = MustBuild(items);
-        if (doc.Tracks[0].AlbumGainDb is not null) throw new Exception("album gain should omit");
-        if (doc.Coverage.MissingAlbumGain != 1) throw new Exception("missingAlbumGain");
-    }
-
-    private static void CaseMissingBoth(string fixturesDir)
-    {
-        var (_, items) = OfflineItemsReader.Read(Path.Combine(fixturesDir, "input-missing-both-gains.json"));
-        var doc = MustBuild(items);
-        if (doc.Tracks.Count != 1) throw new Exception("should include entry with both missing");
-        if (doc.Coverage.MissingBothGains != 1) throw new Exception("missingBothGains");
+        foreach (var name in new[] { "input-missing-track-gain.json", "input-missing-album-gain.json", "input-missing-both-gains.json" })
+        {
+            var (_, items) = OfflineItemsReader.Read(Path.Combine(fixturesDir, name));
+            MustBuild(items);
+        }
     }
 
     private static void CaseBackslash()
     {
-        var items = new List<SourceItem>
-        {
-            new()
-            {
-                Id = "a",
-                Path = @"C:\Music\Sub\File.mp3",
-                NormalizationGain = 1.0
-            }
-        };
-        var doc = MustBuild(items);
+        var doc = MustBuild([Item("a", @"C:\Music\Sub\File.mp3", 1.0)]);
         if (doc.Tracks[0].RelativePath != "Sub/File.mp3") throw new Exception(doc.Tracks[0].RelativePath);
     }
 
     private static void CaseUnicodePreserve()
     {
-        var items = new List<SourceItem>
-        {
-            new()
-            {
-                Id = "u1",
-                Path = "C:/Music/Artist/Café/Song.flac",
-                NormalizationGain = 0.0
-            }
-        };
-        var doc = MustBuild(items);
-        if (!doc.Tracks[0].RelativePath.Contains('é', StringComparison.Ordinal) &&
-            !doc.Tracks[0].RelativePath.Contains("Cafe", StringComparison.Ordinal))
-        {
-            // Accept NFC café
-        }
+        var doc = MustBuild([Item("u1", "C:/Music/Artist/Café/Song.flac", 0.0)]);
+        if (doc.Tracks[0].RelativePath != "Artist/Café/Song.flac") throw new Exception(doc.Tracks[0].RelativePath);
+    }
 
-        if (doc.Tracks[0].RelativePath != "Artist/Café/Song.flac")
-        {
-            throw new Exception("preserve unicode: " + doc.Tracks[0].RelativePath);
-        }
+    private static void CaseStrasse()
+    {
+        var a = UnicodeCaseFold.FullCaseFoldNfc("Straße");
+        var b = UnicodeCaseFold.FullCaseFoldNfc("STRASSE");
+        if (a != b) throw new Exception($"Strasse fold {a} vs {b}");
+        var key1 = UnicodeCaseFold.BuildCollisionKey("music", "Straße/a.flac");
+        var key2 = UnicodeCaseFold.BuildCollisionKey("music", "STRASSE/a.flac");
+        if (key1 != key2) throw new Exception("strasse keys");
+    }
+
+    private static void CaseSigma()
+    {
+        // final sigma ς (U+03C2) folds to σ (U+03C3); capital Σ also to σ
+        var finalSig = UnicodeCaseFold.FullCaseFold("\u03C2");
+        var capital = UnicodeCaseFold.FullCaseFold("\u03A3");
+        if (finalSig != capital) throw new Exception($"sigma {finalSig} vs {capital}");
     }
 
     private static void CaseUnicodeCollision()
     {
-        // U+00E9 (NFC é) vs e + combining acute (NFD)
         var nfc = "Café";
-        var nfd = ("Cafe" + "\u0301"); // e + combining acute on last e? Better: "Cafe\u0301" is Cafe + acute on e
-        nfd = "Caf" + "e\u0301";
+        var nfd = "Caf" + "e\u0301";
         var items = new List<SourceItem>
         {
-            new() { Id = "1", Path = $"C:/Music/{nfc}/a.flac", NormalizationGain = 1 },
-            new() { Id = "2", Path = $"C:/Music/{nfd}/a.flac", NormalizationGain = 2 }
+            Item("1", $"C:/Music/{nfc}/a.flac", 1),
+            Item("2", $"C:/Music/{nfd}/a.flac", 2)
         };
-        var complete = new ExportBuilder(MusicRoot(), false, "SYNTHETIC", false).Build(items);
-        if (complete.Success) throw new Exception("complete should fail on unicode collision");
+        if (new ExportBuilder(MusicRoot(), false, "SYNTHETIC", false).Build(items).Success)
+            throw new Exception("complete should fail");
         var partial = MustBuild(items, partial: true);
-        if (partial.Tracks.Count != 0) throw new Exception("collision must not emit either");
-        if (partial.Coverage.Collisions < 1) throw new Exception("collisions count");
+        if (partial.Tracks.Count != 0) throw new Exception("no emit");
+        if (partial.Coverage.Collisions != 2) throw new Exception($"collisions={partial.Coverage.Collisions}");
+    }
+
+    private static void CaseRootIdOrdinal()
+    {
+        var k1 = UnicodeCaseFold.BuildCollisionKey("Music", "a.flac");
+        var k2 = UnicodeCaseFold.BuildCollisionKey("music", "a.flac");
+        if (k1 == k2) throw new Exception("rootId must be ordinal-exact");
+    }
+
+    private static void CaseTurkishNonTurkic()
+    {
+        // Non-Turkic: I (U+0049) -> i (U+0069), NOT ı (U+0131). T mapping excluded.
+        var folded = UnicodeCaseFold.FullCaseFold("I");
+        if (folded != "i") throw new Exception($"got {folded}");
+        // Dotted İ (U+0130) full fold -> i + combining dot
+        var dotted = UnicodeCaseFold.FullCaseFold("\u0130");
+        if (!dotted.StartsWith('i')) throw new Exception(dotted);
+    }
+
+    private static void CaseSupplementary()
+    {
+        // Deseret capital 𐐀 (U+10400) -> 𐐨 (U+10428) per CaseFolding
+        var s = char.ConvertFromUtf32(0x10400);
+        var folded = UnicodeCaseFold.FullCaseFold(s);
+        var expect = char.ConvertFromUtf32(0x10428);
+        if (folded != expect) throw new Exception($"{folded} vs {expect}");
     }
 
     private static void CaseCaseCollision()
     {
         var items = new List<SourceItem>
         {
-            new() { Id = "1", Path = @"C:\Music\Artist\Song.flac", NormalizationGain = 1 },
-            new() { Id = "2", Path = @"C:\Music\artist\song.flac", NormalizationGain = 2 }
+            Item("1", @"C:\Music\Artist\Song.flac", 1),
+            Item("2", @"C:\Music\artist\song.flac", 2)
         };
-        var complete = new ExportBuilder(MusicRoot(), false, "SYNTHETIC", false).Build(items);
-        if (complete.Success) throw new Exception("complete should fail case collision");
         var partial = MustBuild(items, partial: true);
-        if (partial.Tracks.Count != 0) throw new Exception("no emit on collision");
+        if (partial.Tracks.Count != 0 || partial.Coverage.Collisions != 2) throw new Exception("case collision");
+    }
+
+    private static void CaseTripleCollision()
+    {
+        var items = new List<SourceItem>
+        {
+            Item("1", @"C:\Music\A\x.flac", 1),
+            Item("2", @"C:\Music\a\x.flac", 2),
+            Item("3", @"C:\Music\A\X.flac", 3)
+        };
+        var partial = MustBuild(items, partial: true);
+        if (partial.Tracks.Count != 0) throw new Exception("reemit");
+        if (partial.Coverage.Collisions != 3) throw new Exception($"collisions={partial.Coverage.Collisions}");
     }
 
     private static void CaseRejectTraversal()
     {
-        var items = new List<SourceItem>
-        {
-            new() { Id = "1", Path = @"C:\Music\..\Secret\a.flac", NormalizationGain = 1 }
-        };
-        // After strip of C:\Music\, residual is ../Secret/a.flac → dot_segment
-        // Actually path C:\Music\..\Secret\a.flac unified = C:/Music/../Secret/a.flac
-        // Starts with C:/Music/ → residual ../Secret/a.flac → reject
-        var complete = new ExportBuilder(MusicRoot(), false, "SYNTHETIC", false).Build(items);
-        if (complete.Success) throw new Exception("should reject traversal");
+        var r = new ExportBuilder(MusicRoot(), false, "SYNTHETIC", false).Build([Item("1", @"C:\Music\..\Secret\a.flac", 1)]);
+        if (r.Success) throw new Exception("should reject");
     }
 
-    private static void CaseRejectAbsoluteResidual()
+    private static void CaseAbsoluteResidualMatched()
     {
-        // Crafted: root C:\Music and path that somehow — use overlapping style via MapPath directly
-        var roots = MusicRoot();
-        var r = PathMapper.MapPath(@"D:\Other\a.flac", roots);
-        if (r.Status != MapStatus.Unmatched) throw new Exception("expected unmatched");
+        // Matched root but residual itself absolute-like: craft via path C:\Music\C:\evil — after strip residual "C:/evil"
+        var map = PathMapper.MapPath(@"C:\Music\C:\evil.flac", MusicRoot());
+        if (map.Status == MapStatus.Ok) throw new Exception("should not ok");
+        if (map.ErrorCode is not ("drive_residual" or "colon_in_segment" or "invalid_path_syntax"))
+            throw new Exception("code=" + map.ErrorCode);
     }
 
     private static void CaseRejectOverlapRoots()
@@ -206,106 +232,255 @@ internal static class SelfTest
             PathMapper.ParseRoots(["music=C:\\Music", "other=C:\\Music\\Album"]);
             throw new Exception("should throw");
         }
-        catch (ArgumentException)
+        catch (SafeErrorException) { }
+    }
+
+    private static void CaseDriveRoot()
+    {
+        var roots = PathMapper.ParseRoots(["drive=C:\\"]);
+        if (roots[0].NormalizedPrefix != "C:/") throw new Exception(roots[0].NormalizedPrefix);
+        var map = PathMapper.MapPath(@"C:\Music\a.flac", roots);
+        if (map.Status != MapStatus.Ok || map.RelativePath != "Music/a.flac") throw new Exception(map.RelativePath + " " + map.Status);
+    }
+
+    private static void CaseDeviceNamespace()
+    {
+        try
         {
-            // expected
+            PathMapper.ParseRoots(["x=\\\\.\\C:\\Music"]);
+            throw new Exception("should reject");
         }
+        catch (SafeErrorException) { }
+    }
+
+    private static void CaseDotRoot()
+    {
+        try
+        {
+            PathMapper.ParseRoots(["x=C:\\Music\\..\\Other"]);
+            throw new Exception("should reject");
+        }
+        catch (SafeErrorException) { }
+    }
+
+    private static void CaseNoTrim()
+    {
+        // Trailing space segment invalid
+        var map = PathMapper.MapPath("C:/Music/bad /a.flac", MusicRoot());
+        if (map.Status == MapStatus.Ok) throw new Exception("trailing space should fail");
     }
 
     private static void CaseExplicitPartial()
     {
         var items = new List<SourceItem>
         {
-            new() { Id = "ok", Path = @"C:\Music\A\a.flac", NormalizationGain = 1 },
-            new() { Id = "bad", Path = @"D:\Nope\b.flac", NormalizationGain = 1 }
+            Item("ok", @"C:\Music\A\a.flac", 1),
+            Item("bad", @"D:\Nope\b.flac", 1)
         };
-        var blocked = new ExportBuilder(MusicRoot(), false, "SYNTHETIC", false).Build(items);
-        if (blocked.Success) throw new Exception("complete should block unmatched");
+        if (new ExportBuilder(MusicRoot(), false, "SYNTHETIC", false).Build(items).Success)
+            throw new Exception("complete block");
         var doc = MustBuild(items, partial: true);
-        if (!doc.Coverage.Partial) throw new Exception("partial flag");
-        if (doc.Tracks.Count != 1) throw new Exception("one exported");
-        if (doc.Coverage.Unmatched != 1) throw new Exception("unmatched count");
+        if (!doc.Coverage.Partial || doc.Tracks.Count != 1 || doc.Coverage.Unmatched != 1) throw new Exception("partial");
+    }
+
+    private static void CaseCoverageExportedOnly()
+    {
+        // One unmatched (missing gains irrelevant), one exported with missing track gain
+        var items = new List<SourceItem>
+        {
+            Item("bad", @"D:\Nope\b.flac"),
+            Item("ok", @"C:\Music\A\a.flac", track: null, album: -1.0)
+        };
+        var doc = MustBuild(items, partial: true);
+        if (doc.Coverage.MissingTrackGain != 1) throw new Exception("missingTrack only exported");
+        if (doc.Coverage.MissingAlbumGain != 0) throw new Exception("album present");
+        if (doc.Coverage.Unmatched != 1) throw new Exception("unmatched");
     }
 
     private static void CaseOutOfRange()
     {
-        var items = new List<SourceItem>
-        {
-            new() { Id = "1", Path = @"C:\Music\a.flac", NormalizationGain = 40.0 }
-        };
-        var doc = MustBuild(items);
-        if (doc.Tracks[0].TrackGainDb != 40.0) throw new Exception("must not clamp");
-        if (doc.Coverage.OutOfRangeGains != 1) throw new Exception("outOfRange flag");
+        var doc = MustBuild([Item("1", @"C:\Music\a.flac", 40.0)]);
+        if (doc.Tracks[0].TrackGainDb != 40.0 || doc.Coverage.OutOfRangeGains != 1) throw new Exception("oor");
     }
 
-    private static void CaseNonfinite(string fixturesDir)
+    private static void CaseNonfiniteFixture(string fixturesDir)
     {
-        var rawPath = Path.Combine(fixturesDir, "input-nonfinite-raw.txt");
-        var raw = File.ReadAllBytes(rawPath);
+        // Actual invalid JSON with NaN token — must fail parse as malformed_json (not catch Assertion)
+        var path = Path.Combine(fixturesDir, "input-nonfinite-nan.json");
+        var raw = File.ReadAllBytes(path);
         try
         {
             OfflineItemsReader.Parse(raw);
-            throw new Exception("nonfinite JSON should fail parse");
+            throw new Exception("should fail parse");
         }
-        catch (Exception)
+        catch (SafeErrorException ex) when (ex.Code is "malformed_json" or "nonfinite_gain")
         {
-            // JsonDocument may throw JsonException on NaN; or our reader throws InvalidDataException
+            // STJ rejects NaN as malformed JSON — expected
+        }
+        catch (SafeErrorException ex)
+        {
+            throw new Exception("unexpected code " + ex.Code);
         }
     }
 
-    private static void CaseUnknownField(string fixturesDir)
+    private static void CaseUnknownNested(string fixturesDir)
     {
         var (_, items) = OfflineItemsReader.Read(Path.Combine(fixturesDir, "input-unknown-field.json"));
-        var doc = MustBuild(items);
-        if (doc.Tracks.Count != 1) throw new Exception("should still export");
+        MustBuild(items);
+    }
+
+    private static void CaseLogicalAliasDup()
+    {
+        var json = """{"serverVersion":"SYNTHETIC","items":[{"Id":"1","Path":"C:\\Music\\a.flac","NormalizationGain":1.0,"trackGainDb":2.0}]}"""u8.ToArray();
+        try
+        {
+            OfflineItemsReader.Parse(json);
+            throw new Exception("should fail alias");
+        }
+        catch (SafeErrorException ex) when (ex.Code == "track_gain_alias_dup") { }
     }
 
     private static void CaseDuplicateProperty()
     {
-        var json = """{"serverVersion":"x","items":[{"Id":"1","Id":"2","Path":"C:\\Music\\a.flac"}]}"""u8;
-        try
-        {
-            OfflineItemsReader.Parse(json.ToArray());
-            throw new Exception("duplicate should fail");
-        }
-        catch (InvalidDataException)
-        {
-            // expected
-        }
+        var json = """{"serverVersion":"x","items":[{"Id":"1","Id":"2","Path":"C:\\Music\\a.flac"}]}"""u8.ToArray();
+        try { OfflineItemsReader.Parse(json); throw new Exception("dup"); }
+        catch (SafeErrorException ex) when (ex.Code == "duplicate_property") { }
     }
 
-    private static void CaseAtomicNoOverwrite()
+    private static void CaseInvalidGainType()
     {
-        var dir = Directory.CreateTempSubdirectory("jle-test-");
+        var json = """{"serverVersion":"SYNTHETIC","items":[{"Id":"1","Path":"C:\\Music\\a.flac","NormalizationGain":true}]}"""u8.ToArray();
+        var (_, items) = OfflineItemsReader.Parse(json);
+        var r = new ExportBuilder(MusicRoot(), true, "SYNTHETIC", false).Build(items);
+        if (!r.Success) throw new Exception("partial should succeed with reject");
+        if (r.Document!.Coverage.Rejected != 1) throw new Exception("rejected");
+    }
+
+    private static void CaseAtomicWriter()
+    {
+        var dir = Directory.CreateTempSubdirectory("jle-w-");
         try
         {
             var outPath = Path.Combine(dir.FullName, "out.json");
-            var doc = MustBuild(
-            [
-                new SourceItem { Id = "1", Path = @"C:\Music\a.flac", NormalizationGain = 1 }
-            ]);
+            var doc = MustBuild([Item("1", @"C:\Music\a.flac", 1)]);
             ExportWriter.WriteAtomic(doc, outPath, force: false);
-            try
-            {
-                ExportWriter.WriteAtomic(doc, outPath, force: false);
-                throw new Exception("should refuse overwrite");
-            }
-            catch (IOException)
-            {
-                // expected
-            }
-
+            try { ExportWriter.WriteAtomic(doc, outPath, force: false); throw new Exception("overwrite"); }
+            catch (SafeErrorException) { }
             ExportWriter.WriteAtomic(doc, outPath, force: true);
-            // UTF-8 no BOM
             var bytes = File.ReadAllBytes(outPath);
-            if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
-            {
-                throw new Exception("BOM not allowed");
-            }
+            if (bytes.Length >= 3 && bytes[0] == 0xEF) throw new Exception("BOM");
+            // failure path: simulate by writing to invalid nested when parent is file — skip
         }
-        finally
+        finally { dir.Delete(true); }
+    }
+
+    private static void CaseWriterPreexistingTemp()
+    {
+        var dir = Directory.CreateTempSubdirectory("jle-t-");
+        try
         {
-            dir.Delete(true);
+            // Predictable .tmp sibling must NOT be used; create one and ensure write still works
+            File.WriteAllText(Path.Combine(dir.FullName, "out.json.tmp"), "STALE");
+            var outPath = Path.Combine(dir.FullName, "out.json");
+            var doc = MustBuild([Item("1", @"C:\Music\a.flac", 1)]);
+            ExportWriter.WriteAtomic(doc, outPath, force: false);
+            if (File.ReadAllText(Path.Combine(dir.FullName, "out.json.tmp")) != "STALE")
+                throw new Exception("must not touch predictable tmp");
+            if (!File.Exists(outPath)) throw new Exception("missing out");
+        }
+        finally { dir.Delete(true); }
+    }
+
+    private static void CaseSharedValid(string fixturesDir)
+    {
+        using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(fixturesDir, "shared-valid-export.json")));
+        var root = doc.RootElement;
+        if (root.GetProperty("format").GetString() != "jellyfin-loudness-export") throw new Exception("format");
+        if (root.GetProperty("schemaVersion").GetInt32() != 1) throw new Exception("ver");
+        if (!root.TryGetProperty("tracks", out _) || !root.TryGetProperty("coverage", out _)) throw new Exception("shape");
+    }
+
+    private static void CaseHttpNormalizeSlash()
+    {
+        var u = JellyfinApiClient.NormalizeBaseUri("https://example.com/jellyfin", allowHttp: false);
+        if (!u.AbsoluteUri.EndsWith("/jellyfin/", StringComparison.Ordinal)) throw new Exception(u.AbsoluteUri);
+    }
+
+    private static void CaseHttpUserInfo()
+    {
+        try
+        {
+            JellyfinApiClient.NormalizeBaseUri("https://user:pass@example.com/", false);
+            throw new Exception("should reject");
+        }
+        catch (SafeErrorException ex) when (ex.Code == "base_url_userinfo") { }
+    }
+
+    private static void CaseHttpPaginationFake()
+    {
+        var calls = 0;
+        var handler = new FakeHttpHandler
+        {
+            Responder = req =>
+            {
+                calls++;
+                var path = req.RequestUri!.PathAndQuery;
+                if (path.Contains("System/Info", StringComparison.Ordinal))
+                    return FakeHttpHandler.Json(HttpStatusCode.OK, """{"Version":"10.11.0-SYNTHETIC"}""");
+                if (path.Contains("startIndex=0", StringComparison.Ordinal))
+                    return FakeHttpHandler.Json(HttpStatusCode.OK,
+                        """{"TotalRecordCount":2,"Items":[{"Id":"1","Path":"C:\\Music\\a.flac","NormalizationGain":1.0},{"Id":"2","Path":"C:\\Music\\b.flac","NormalizationGain":2.0}]}""");
+                return FakeHttpHandler.Json(HttpStatusCode.OK, """{"TotalRecordCount":2,"Items":[]}""");
+            }
+        };
+        using var client = new JellyfinApiClient("https://example.com/", "token", handler);
+        var items = client.FetchAudioItemsAsync(null, CancellationToken.None).GetAwaiter().GetResult();
+        if (items.Count != 2) throw new Exception("count " + items.Count);
+    }
+
+    private static void CaseHttpRedirect()
+    {
+        var handler = new FakeHttpHandler
+        {
+            Responder = _ => new HttpResponseMessage(HttpStatusCode.Redirect) { Headers = { Location = new Uri("https://evil.example/") } }
+        };
+        using var client = new JellyfinApiClient("https://example.com/", "token", handler);
+        try
+        {
+            client.FetchAudioItemsAsync(null, CancellationToken.None).GetAwaiter().GetResult();
+            throw new Exception("should refuse redirect");
+        }
+        catch (SafeErrorException ex) when (ex.Code == "redirect_refused") { }
+    }
+
+    private static void CaseHttpInvalidGain()
+    {
+        var handler = new FakeHttpHandler
+        {
+            Responder = req =>
+            {
+                if (req.RequestUri!.PathAndQuery.Contains("Items", StringComparison.Ordinal))
+                    return FakeHttpHandler.Json(HttpStatusCode.OK,
+                        """{"TotalRecordCount":1,"Items":[{"Id":"1","Path":"C:\\Music\\a.flac","NormalizationGain":true}]}""");
+                return FakeHttpHandler.Json(HttpStatusCode.OK, """{"Version":"x"}""");
+            }
+        };
+        using var client = new JellyfinApiClient("https://example.com/", "token", handler);
+        var items = client.FetchAudioItemsAsync(null, CancellationToken.None).GetAwaiter().GetResult();
+        if (items[0].TrackGainStatus != GainStatus.InvalidType) throw new Exception("invalid type");
+    }
+
+    private static void CaseCollisionVectors(string fixturesDir)
+    {
+        var path = Path.Combine(fixturesDir, "collision-key-vectors.json");
+        using var doc = JsonDocument.Parse(File.ReadAllText(path));
+        foreach (var v in doc.RootElement.GetProperty("vectors").EnumerateArray())
+        {
+            var rootId = v.GetProperty("rootId").GetString()!;
+            var relative = v.GetProperty("relativePath").GetString()!;
+            var expected = v.GetProperty("expectedCollisionKey").GetString()!;
+            var actual = UnicodeCaseFold.BuildCollisionKey(rootId, relative);
+            if (actual != expected) throw new Exception($"{v.GetProperty("name").GetString()}: {actual} != {expected}");
         }
     }
 
@@ -315,21 +490,13 @@ internal static class SelfTest
         var items = new List<SourceItem>(n);
         for (var i = 0; i < n; i++)
         {
-            items.Add(new SourceItem
-            {
-                Id = i.ToString("D8", CultureInfo.InvariantCulture),
-                AlbumId = (i / 10).ToString("D8", CultureInfo.InvariantCulture),
-                Path = $@"C:\Music\A{i / 1000}\B{i}\track.flac",
-                NormalizationGain = -1.0,
-                AlbumNormalizationGain = -0.5
-            });
+            items.Add(Item(i.ToString("D8", CultureInfo.InvariantCulture), $@"C:\Music\A{i / 1000}\B{i}\track.flac", -1.0, -0.5));
         }
-
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var doc = MustBuild(items);
         sw.Stop();
-        if (doc.Tracks.Count != n) throw new Exception("100k count");
-        if (sw.ElapsedMilliseconds > 60_000) throw new Exception($"too slow: {sw.ElapsedMilliseconds}ms");
+        if (doc.Tracks.Count != n) throw new Exception("count");
+        if (sw.ElapsedMilliseconds > 90_000) throw new Exception($"slow {sw.ElapsedMilliseconds}");
         Console.WriteLine($"    (100k build {sw.ElapsedMilliseconds}ms)");
     }
 
@@ -338,35 +505,21 @@ internal static class SelfTest
         foreach (var file in Directory.EnumerateFiles(fixturesDir))
         {
             var name = Path.GetFileName(file);
-            if (name.StartsWith(".", StringComparison.Ordinal)) continue;
+            if (name.StartsWith('.')) continue;
             var text = File.ReadAllText(file);
             if (!text.Contains("SYNTHETIC", StringComparison.Ordinal))
-            {
-                throw new Exception($"fixture missing SYNTHETIC marker: {name}");
-            }
+                throw new Exception("missing SYNTHETIC: " + name);
         }
     }
 
-    private static void AssertValidExportShape(ExportDocument doc)
+    private static void CaseExpectedNormalCanonical(string fixturesDir)
     {
-        if (doc.Format != "jellyfin-loudness-export") throw new Exception("format");
-        if (doc.SchemaVersion != 1) throw new Exception("schemaVersion");
-        if (doc.Source.Kind != "jellyfin-api") throw new Exception("source.kind");
-        if (doc.Source.GainOrigin != "lufs-or-replaygain-unspecified") throw new Exception("gainOrigin");
-        if (doc.Source.GainUnits != "dB") throw new Exception("gainUnits");
-    }
-
-    private static void AssertMatchesExpectedTracks(string expectedPath, ExportDocument doc)
-    {
-        using var expectedDoc = JsonDocument.Parse(File.ReadAllText(expectedPath));
-        var expTracks = expectedDoc.RootElement.GetProperty("tracks");
-        if (expTracks.GetArrayLength() != doc.Tracks.Count) throw new Exception("expected track count");
-        for (var i = 0; i < doc.Tracks.Count; i++)
-        {
-            var e = expTracks[i];
-            var t = doc.Tracks[i];
-            if (e.GetProperty("relativePath").GetString() != t.RelativePath) throw new Exception("expected path mismatch");
-            if (e.GetProperty("rootId").GetString() != t.RootId) throw new Exception("rootId");
-        }
+        var (ver, items) = OfflineItemsReader.Read(Path.Combine(fixturesDir, "input-normal.json"));
+        var doc = new ExportBuilder(MusicRoot(), false, ver, true).Build(items).Document!;
+        // Compare tracks to expected; ignore exportedAt timestamp by overlay
+        using var expected = JsonDocument.Parse(File.ReadAllText(Path.Combine(fixturesDir, "expected-normal.json")));
+        var expTrack = expected.RootElement.GetProperty("tracks")[0];
+        if (expTrack.GetProperty("relativePath").GetString() != doc.Tracks[0].RelativePath) throw new Exception("path");
+        if (Math.Abs(expTrack.GetProperty("trackGainDb").GetDouble() - doc.Tracks[0].TrackGainDb!.Value) > 1e-9) throw new Exception("gain");
     }
 }

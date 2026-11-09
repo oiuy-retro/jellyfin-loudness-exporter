@@ -4,13 +4,20 @@ namespace JellyfinLoudnessExporter;
 
 internal static class OfflineItemsReader
 {
-    public static (string ServerVersion, List<SourceItem> Items) Read(string path)
+    // Logical aliases that must not appear together on one item.
+    private static readonly string[] TrackGainAliases = ["NormalizationGain", "normalizationGain", "trackGainDb"];
+    private static readonly string[] AlbumGainAliases = ["AlbumNormalizationGain", "albumNormalizationGain", "albumGainDb"];
+    private static readonly string[] IdAliases = ["Id", "id", "sourceItemId"];
+    private static readonly string[] AlbumIdAliases = ["AlbumId", "albumId", "sourceAlbumId"];
+    private static readonly string[] PathAliases = ["Path", "path"];
+
+    public static (string? ServerVersion, List<SourceItem> Items) Read(string path)
     {
         var bytes = File.ReadAllBytes(path);
         return Parse(bytes);
     }
 
-    public static (string ServerVersion, List<SourceItem> Items) Parse(ReadOnlySpan<byte> utf8Json)
+    public static (string? ServerVersion, List<SourceItem> Items) Parse(ReadOnlySpan<byte> utf8Json)
     {
         var options = new JsonDocumentOptions
         {
@@ -21,149 +28,179 @@ internal static class OfflineItemsReader
 
         RejectDuplicateProperties(utf8Json);
         var rented = utf8Json.ToArray();
-        using var doc = JsonDocument.Parse(rented, options);
-        if (doc.RootElement.ValueKind != JsonValueKind.Object)
+
+        JsonDocument doc;
+        try
         {
-            throw new InvalidDataException("Offline input root must be an object.");
+            doc = JsonDocument.Parse(rented, options);
+        }
+        catch (JsonException)
+        {
+            throw new SafeErrorException(SafeError.Category.Json, "malformed_json");
         }
 
-        var root = doc.RootElement;
-        var serverVersion = "unknown";
-        if (root.TryGetProperty("serverVersion", out var sv) && sv.ValueKind == JsonValueKind.String)
+        using (doc)
         {
-            serverVersion = sv.GetString() ?? "unknown";
-        }
-
-        if (!root.TryGetProperty("items", out var itemsEl) || itemsEl.ValueKind != JsonValueKind.Array)
-        {
-            throw new InvalidDataException("Offline input must contain an 'items' array.");
-        }
-
-        var items = new List<SourceItem>(itemsEl.GetArrayLength());
-        foreach (var el in itemsEl.EnumerateArray())
-        {
-            if (el.ValueKind != JsonValueKind.Object)
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
             {
-                throw new InvalidDataException("Each item must be an object.");
+                throw new SafeErrorException(SafeError.Category.Json, "root_not_object");
             }
 
-            items.Add(ParseItem(el));
-        }
+            var root = doc.RootElement;
+            string? serverVersion = null;
+            if (root.TryGetProperty("serverVersion", out var sv))
+            {
+                if (sv.ValueKind == JsonValueKind.String)
+                {
+                    serverVersion = sv.GetString();
+                }
+                else if (sv.ValueKind != JsonValueKind.Null)
+                {
+                    throw new SafeErrorException(SafeError.Category.Json, "serverVersion_type");
+                }
+            }
 
-        return (serverVersion, items);
+            if (!root.TryGetProperty("items", out var itemsEl) || itemsEl.ValueKind != JsonValueKind.Array)
+            {
+                throw new SafeErrorException(SafeError.Category.Json, "items_missing");
+            }
+
+            var items = new List<SourceItem>(itemsEl.GetArrayLength());
+            foreach (var el in itemsEl.EnumerateArray())
+            {
+                if (el.ValueKind != JsonValueKind.Object)
+                {
+                    throw new SafeErrorException(SafeError.Category.Json, "item_not_object");
+                }
+
+                items.Add(ParseItem(el));
+            }
+
+            return (serverVersion, items);
+        }
     }
 
     private static SourceItem ParseItem(JsonElement el)
     {
+        RejectLogicalAliasDupes(el, TrackGainAliases, "track_gain_alias_dup");
+        RejectLogicalAliasDupes(el, AlbumGainAliases, "album_gain_alias_dup");
+        RejectLogicalAliasDupes(el, IdAliases, "id_alias_dup");
+        RejectLogicalAliasDupes(el, AlbumIdAliases, "album_id_alias_dup");
+        RejectLogicalAliasDupes(el, PathAliases, "path_alias_dup");
+
         string? id = null;
         string? albumId = null;
         string? path = null;
+        var trackStatus = GainStatus.Missing;
+        var albumStatus = GainStatus.Missing;
         double? trackGain = null;
         double? albumGain = null;
-        var trackGainSeen = false;
-        var albumGainSeen = false;
 
         foreach (var prop in el.EnumerateObject())
         {
-            switch (prop.Name)
+            // Unknown fields ignored at every object level.
+            if (TrackGainAliases.Contains(prop.Name, StringComparer.Ordinal))
             {
-                case "Id":
-                case "id":
-                case "sourceItemId":
-                    id = prop.Value.GetString();
-                    break;
-                case "AlbumId":
-                case "albumId":
-                case "sourceAlbumId":
-                    if (prop.Value.ValueKind != JsonValueKind.Null)
-                    {
-                        albumId = prop.Value.GetString();
-                    }
+                var g = GainParser.Parse(prop.Value);
+                trackStatus = MapGain(g);
+                trackGain = g.Value;
+            }
+            else if (AlbumGainAliases.Contains(prop.Name, StringComparer.Ordinal))
+            {
+                var g = GainParser.Parse(prop.Value);
+                albumStatus = MapGain(g);
+                albumGain = g.Value;
+            }
+            else if (IdAliases.Contains(prop.Name, StringComparer.Ordinal))
+            {
+                if (prop.Value.ValueKind != JsonValueKind.String)
+                {
+                    throw new SafeErrorException(SafeError.Category.Json, "id_type");
+                }
 
-                    break;
-                case "Path":
-                case "path":
-                    path = prop.Value.GetString();
-                    break;
-                case "NormalizationGain":
-                case "normalizationGain":
-                case "trackGainDb":
-                    trackGainSeen = true;
-                    trackGain = ReadNumber(prop.Value, "NormalizationGain");
-                    break;
-                case "AlbumNormalizationGain":
-                case "albumNormalizationGain":
-                case "albumGainDb":
-                    albumGainSeen = true;
-                    albumGain = ReadNumber(prop.Value, "AlbumNormalizationGain");
-                    break;
-                default:
-                    // Additive unknown fields ignored.
-                    break;
+                id = prop.Value.GetString();
+            }
+            else if (AlbumIdAliases.Contains(prop.Name, StringComparer.Ordinal))
+            {
+                if (prop.Value.ValueKind == JsonValueKind.Null)
+                {
+                    albumId = null;
+                }
+                else if (prop.Value.ValueKind == JsonValueKind.String)
+                {
+                    albumId = prop.Value.GetString();
+                }
+                else
+                {
+                    // Guid may serialize as string; reject object/bool
+                    albumId = prop.Value.ToString();
+                }
+            }
+            else if (PathAliases.Contains(prop.Name, StringComparer.Ordinal))
+            {
+                if (prop.Value.ValueKind != JsonValueKind.String)
+                {
+                    throw new SafeErrorException(SafeError.Category.Json, "path_type");
+                }
+
+                path = prop.Value.GetString();
             }
         }
 
         if (string.IsNullOrWhiteSpace(id))
         {
-            throw new InvalidDataException("Item missing Id.");
+            throw new SafeErrorException(SafeError.Category.Json, "item_missing_id");
         }
 
-        if (string.IsNullOrWhiteSpace(path))
+        if (path is null)
         {
-            throw new InvalidDataException($"Item {id} missing Path.");
+            throw new SafeErrorException(SafeError.Category.Json, "item_missing_path");
         }
 
         return new SourceItem
         {
             Id = id,
             AlbumId = albumId,
-            Path = path,
-            NormalizationGain = trackGainSeen ? trackGain : null,
-            AlbumNormalizationGain = albumGainSeen ? albumGain : null
+            Path = path, // do not trim
+            NormalizationGain = trackGain,
+            AlbumNormalizationGain = albumGain,
+            TrackGainStatus = trackStatus,
+            AlbumGainStatus = albumStatus
         };
     }
 
-    private static double? ReadNumber(JsonElement value, string field)
+    private static GainStatus MapGain(GainParser.ParseResult g) => g.Kind switch
     {
-        if (value.ValueKind == JsonValueKind.Null)
+        GainParser.ResultKind.Missing => GainStatus.Missing,
+        GainParser.ResultKind.Finite => GainStatus.Finite,
+        GainParser.ResultKind.NonFinite => GainStatus.NonFinite,
+        _ => GainStatus.InvalidType
+    };
+
+    internal static void RejectLogicalAliasDupes(JsonElement el, string[] aliases, string code)
+    {
+        var count = 0;
+        foreach (var prop in el.EnumerateObject())
         {
-            return null;
-        }
-
-        if (value.ValueKind == JsonValueKind.Number)
-        {
-            if (!value.TryGetDouble(out var d))
+            if (aliases.Contains(prop.Name, StringComparer.Ordinal))
             {
-                throw new InvalidDataException($"{field} is not a finite number.");
-            }
-
-            if (double.IsNaN(d) || double.IsInfinity(d))
-            {
-                throw new InvalidDataException($"{field} is not a finite number.");
-            }
-
-            return d;
-        }
-
-        // Non-standard tokens like NaN are not valid JSON; if a reader ever produced a string, reject.
-        if (value.ValueKind == JsonValueKind.String)
-        {
-            var s = value.GetString();
-            if (string.Equals(s, "NaN", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(s, "Infinity", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(s, "-Infinity", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidDataException($"{field} is not a finite number.");
+                count++;
             }
         }
 
-        throw new InvalidDataException($"{field} must be a number or null.");
+        if (count > 1)
+        {
+            throw new SafeErrorException(SafeError.Category.Json, code);
+        }
     }
 
-    /// <summary>
-    /// System.Text.Json may last-win duplicates by default depending on options.
-    /// Scan tokens and reject duplicate property names within the same object for security.
-    /// </summary>
+    /// <summary>API items should not mix Jellyfin DTO names with export aliases.</summary>
+    internal static void RejectLogicalAliasDupesPublic(JsonElement el)
+    {
+        RejectLogicalAliasDupes(el, TrackGainAliases, "track_gain_alias_dup");
+        RejectLogicalAliasDupes(el, AlbumGainAliases, "album_gain_alias_dup");
+    }
+
     internal static void RejectDuplicateProperties(ReadOnlySpan<byte> utf8Json)
     {
         var reader = new Utf8JsonReader(utf8Json, new JsonReaderOptions
@@ -174,26 +211,32 @@ internal static class OfflineItemsReader
         });
 
         var stack = new Stack<HashSet<string>>();
-        while (reader.Read())
+        try
         {
-            switch (reader.TokenType)
+            while (reader.Read())
             {
-                case JsonTokenType.StartObject:
-                    stack.Push(new HashSet<string>(StringComparer.Ordinal));
-                    break;
-                case JsonTokenType.EndObject:
-                    stack.Pop();
-                    break;
-                case JsonTokenType.PropertyName:
-                    var name = reader.GetString() ?? "";
-                    var set = stack.Peek();
-                    if (!set.Add(name))
-                    {
-                        throw new InvalidDataException($"Duplicate JSON property: {name}");
-                    }
+                switch (reader.TokenType)
+                {
+                    case JsonTokenType.StartObject:
+                        stack.Push(new HashSet<string>(StringComparer.Ordinal));
+                        break;
+                    case JsonTokenType.EndObject:
+                        stack.Pop();
+                        break;
+                    case JsonTokenType.PropertyName:
+                        var name = reader.GetString() ?? "";
+                        if (!stack.Peek().Add(name))
+                        {
+                            throw new SafeErrorException(SafeError.Category.Json, "duplicate_property");
+                        }
 
-                    break;
+                        break;
+                }
             }
+        }
+        catch (JsonException)
+        {
+            throw new SafeErrorException(SafeError.Category.Json, "malformed_json");
         }
     }
 }

@@ -13,6 +13,12 @@ internal sealed class ExportDocument
     [JsonPropertyName("exportedAt")]
     public string ExportedAt { get; set; } = "";
 
+    [JsonPropertyName("collisionKeyAlgorithm")]
+    public string CollisionKeyAlgorithm { get; set; } = UnicodeCaseFold.AlgorithmId;
+
+    [JsonPropertyName("collisionKey")]
+    public CollisionKeyInfo CollisionKey { get; set; } = new();
+
     [JsonPropertyName("source")]
     public ExportSource Source { get; set; } = new();
 
@@ -26,6 +32,21 @@ internal sealed class ExportDocument
     public ExportCoverage Coverage { get; set; } = new();
 }
 
+internal sealed class CollisionKeyInfo
+{
+    [JsonPropertyName("caseFold")]
+    public string CaseFold { get; set; } = UnicodeCaseFold.CaseFoldSpec;
+
+    [JsonPropertyName("nfc")]
+    public string Nfc { get; set; } = UnicodeCaseFold.NfcSpec;
+
+    [JsonPropertyName("rootId")]
+    public string RootId { get; set; } = "ordinal-exact";
+
+    [JsonPropertyName("relativePath")]
+    public string RelativePath { get; set; } = "";
+}
+
 internal sealed class ExportSource
 {
     [JsonPropertyName("kind")]
@@ -35,7 +56,8 @@ internal sealed class ExportSource
     public string GainOrigin { get; set; } = "lufs-or-replaygain-unspecified";
 
     [JsonPropertyName("serverVersion")]
-    public string ServerVersion { get; set; } = "";
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ServerVersion { get; set; }
 
     [JsonPropertyName("gainUnits")]
     public string GainUnits { get; set; } = "dB";
@@ -60,7 +82,8 @@ internal sealed class ExportTrack
     public string RelativePath { get; set; } = "";
 
     [JsonPropertyName("sourceItemId")]
-    public string SourceItemId { get; set; } = "";
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SourceItemId { get; set; }
 
     [JsonPropertyName("sourceAlbumId")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -135,6 +158,8 @@ internal sealed class SourceItem
     public required string Path { get; init; }
     public double? NormalizationGain { get; init; }
     public double? AlbumNormalizationGain { get; init; }
+    public GainStatus TrackGainStatus { get; init; } = GainStatus.Missing;
+    public GainStatus AlbumGainStatus { get; init; } = GainStatus.Missing;
 }
 
 internal enum MapStatus

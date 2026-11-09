@@ -7,216 +7,298 @@ namespace JellyfinLoudnessExporter;
 
 internal sealed class JellyfinApiClient : IDisposable
 {
-    private readonly HttpClient _http;
-    private readonly Uri _baseUri;
+    public const long MaxResponseBytes = 64L * 1024L * 1024L; // 64 MiB per response
+    public static readonly TimeSpan DefaultTimeout = TimeSpan.FromMinutes(2);
 
-    public JellyfinApiClient(string baseUrl, string token)
+    private readonly HttpClient _http;
+    private readonly bool _ownsClient;
+    private readonly bool _allowHttp;
+
+    public JellyfinApiClient(string baseUrl, string token, HttpMessageHandler? handler = null, bool allowHttp = false, TimeSpan? timeout = null)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            throw new SafeErrorException(SafeError.Category.Usage, "token_required");
+        }
+
+        _allowHttp = allowHttp;
+        var baseUri = NormalizeBaseUri(baseUrl, allowHttp);
+
+        if (handler is null)
+        {
+            handler = new HttpClientHandler { AllowAutoRedirect = false };
+            _ownsClient = true;
+        }
+        else
+        {
+            _ownsClient = true; // we wrap it
+        }
+
+        _http = new HttpClient(handler, disposeHandler: true)
+        {
+            Timeout = timeout ?? DefaultTimeout,
+            BaseAddress = baseUri
+        };
+        _http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        _http.DefaultRequestHeaders.Add("X-Emby-Token", token);
+        _http.MaxResponseContentBufferSize = MaxResponseBytes;
+    }
+
+    internal static Uri NormalizeBaseUri(string baseUrl, bool allowHttp)
     {
         if (string.IsNullOrWhiteSpace(baseUrl))
         {
-            throw new ArgumentException("Base URL is required.");
+            throw new SafeErrorException(SafeError.Category.Usage, "base_url_required");
         }
 
-        if (string.IsNullOrWhiteSpace(token))
+        if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri))
         {
-            throw new ArgumentException("Token is required.");
-        }
-
-        if (baseUrl.Contains('@') || baseUrl.Contains("://") && baseUrl.IndexOf('@') > baseUrl.IndexOf("://", StringComparison.Ordinal))
-        {
-            // Reject userinfo in URL (credentials in URL).
-            if (Uri.TryCreate(baseUrl, UriKind.Absolute, out var probe) && !string.IsNullOrEmpty(probe.UserInfo))
-            {
-                throw new ArgumentException("Base URL must not contain credentials.");
-            }
-        }
-
-        if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri) ||
-            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
-        {
-            throw new ArgumentException("Base URL must be an absolute http or https URL.");
+            throw new SafeErrorException(SafeError.Category.Usage, "base_url_invalid");
         }
 
         if (!string.IsNullOrEmpty(uri.UserInfo))
         {
-            throw new ArgumentException("Base URL must not contain credentials.");
+            throw new SafeErrorException(SafeError.Category.Usage, "base_url_userinfo");
         }
 
-        _baseUri = uri;
-        var handler = new HttpClientHandler
+        if (!string.IsNullOrEmpty(uri.Query) || !string.IsNullOrEmpty(uri.Fragment))
         {
-            AllowAutoRedirect = false // avoid cross-origin redirect credential leaks
-        };
-        _http = new HttpClient(handler)
+            throw new SafeErrorException(SafeError.Category.Usage, "base_url_query_or_fragment");
+        }
+
+        if (uri.Scheme == Uri.UriSchemeHttp)
         {
-            Timeout = TimeSpan.FromMinutes(10),
-            BaseAddress = _baseUri
-        };
-        _http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-        // Jellyfin accepts media browser token header; do not log this value.
-        _http.DefaultRequestHeaders.Add("X-Emby-Token", token);
+            if (!allowHttp)
+            {
+                throw new SafeErrorException(SafeError.Category.Usage, "base_url_http_not_allowed");
+            }
+        }
+        else if (uri.Scheme != Uri.UriSchemeHttps)
+        {
+            throw new SafeErrorException(SafeError.Category.Usage, "base_url_scheme");
+        }
+
+        // Ensure trailing slash so relative "Items" resolves under /jellyfin/ correctly.
+        var builder = new UriBuilder(uri);
+        if (!builder.Path.EndsWith('/'))
+        {
+            builder.Path += "/";
+        }
+
+        builder.Query = null;
+        builder.Fragment = null;
+        return builder.Uri;
     }
 
-    public async Task<string> GetServerVersionAsync(CancellationToken ct)
+    public async Task<string?> GetServerVersionAsync(CancellationToken ct)
     {
         using var resp = await SendAsync(new HttpRequestMessage(HttpMethod.Get, "System/Info/Public"), ct).ConfigureAwait(false);
         await EnsureSuccess(resp).ConfigureAwait(false);
-        await using var stream = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct).ConfigureAwait(false);
+        var bytes = await ReadBoundedAsync(resp, ct).ConfigureAwait(false);
+        OfflineItemsReader.RejectDuplicateProperties(bytes);
+        using var doc = JsonDocument.Parse(bytes);
         if (doc.RootElement.TryGetProperty("Version", out var v) && v.ValueKind == JsonValueKind.String)
         {
-            return v.GetString() ?? "unknown";
+            return v.GetString();
         }
 
-        return "unknown";
+        return null;
     }
 
-    public async Task<(string? UserId, List<SourceItem> Items)> FetchAllAudioItemsAsync(CancellationToken ct)
+    public async Task<string?> TryGetUserIdFromMeAsync(CancellationToken ct)
     {
-        // Prefer API-key style: /Items requires userId unless using elevated key that still needs userId on recent servers.
-        // Resolve a user id via /Users/Me when token is a user session; for API keys require --user-id.
-        string? userId = null;
-        try
+        using var resp = await SendAsync(new HttpRequestMessage(HttpMethod.Get, "Users/Me"), ct).ConfigureAwait(false);
+        if (resp.StatusCode != HttpStatusCode.OK)
         {
-            using var me = await SendAsync(new HttpRequestMessage(HttpMethod.Get, "Users/Me"), ct).ConfigureAwait(false);
-            if (me.StatusCode == HttpStatusCode.OK)
-            {
-                await using var stream = await me.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-                using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct).ConfigureAwait(false);
-                if (doc.RootElement.TryGetProperty("Id", out var idEl))
-                {
-                    userId = idEl.GetString();
-                }
-            }
-        }
-        catch
-        {
-            // Fall through; caller may supply user id.
+            return null;
         }
 
-        return (userId, []);
+        var bytes = await ReadBoundedAsync(resp, ct).ConfigureAwait(false);
+        using var doc = JsonDocument.Parse(bytes);
+        return doc.RootElement.TryGetProperty("Id", out var id) ? id.GetString() : null;
     }
 
-    public async Task<List<SourceItem>> FetchAudioItemsAsync(string userId, CancellationToken ct)
+    public async Task<List<SourceItem>> FetchAudioItemsAsync(string? userId, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(userId))
-        {
-            throw new ArgumentException("userId is required for /Items queries.");
-        }
-
         const int pageSize = 200;
         var start = 0;
         int? total = null;
         var items = new List<SourceItem>();
+        var seenIds = new HashSet<string>(StringComparer.Ordinal);
+        var warnedSnapshot = false;
 
         while (true)
         {
-            var relative =
-                $"Items?userId={Uri.EscapeDataString(userId)}" +
-                $"&includeItemTypes=Audio&recursive=true&fields=Path" +
-                $"&startIndex={start}&limit={pageSize}&enableTotalRecordCount=true";
+            ct.ThrowIfCancellationRequested();
+            var qs = new StringBuilder("Items?includeItemTypes=Audio&recursive=true&fields=Path");
+            qs.Append("&enableTotalRecordCount=true");
+            qs.Append("&sortBy=SortName&sortOrder=Ascending");
+            qs.Append(System.Globalization.CultureInfo.InvariantCulture, $"&startIndex={start}&limit={pageSize}");
+            if (!string.IsNullOrWhiteSpace(userId))
+            {
+                qs.Append("&userId=").Append(Uri.EscapeDataString(userId));
+            }
 
-            using var resp = await SendAsync(new HttpRequestMessage(HttpMethod.Get, relative), ct).ConfigureAwait(false);
+            using var resp = await SendAsync(new HttpRequestMessage(HttpMethod.Get, qs.ToString()), ct).ConfigureAwait(false);
             await EnsureSuccess(resp).ConfigureAwait(false);
-            var bytes = await resp.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
+            var bytes = await ReadBoundedAsync(resp, ct).ConfigureAwait(false);
             OfflineItemsReader.RejectDuplicateProperties(bytes);
 
             using var doc = JsonDocument.Parse(bytes);
             var root = doc.RootElement;
             if (!root.TryGetProperty("Items", out var arr) || arr.ValueKind != JsonValueKind.Array)
             {
-                throw new InvalidDataException("Items response missing Items array.");
+                throw new SafeErrorException(SafeError.Category.Http, "items_missing");
             }
 
             if (root.TryGetProperty("TotalRecordCount", out var totalEl) && totalEl.TryGetInt32(out var t))
             {
-                if (total is null)
-                {
-                    total = t;
-                }
+                if (total is null) total = t;
                 else if (total.Value != t)
                 {
-                    throw new InvalidDataException("TotalRecordCount changed between pages.");
+                    throw new SafeErrorException(SafeError.Category.Http, "total_changed");
                 }
+            }
+            else if (!warnedSnapshot)
+            {
+                warnedSnapshot = true;
+                Console.Error.WriteLine("http_warn:total_missing_cannot_prove_snapshot");
             }
 
             var pageCount = 0;
             foreach (var el in arr.EnumerateArray())
             {
                 pageCount++;
-                items.Add(ParseApiItem(el));
+                var item = ParseApiItem(el);
+                if (!seenIds.Add(item.Id))
+                {
+                    throw new SafeErrorException(SafeError.Category.Http, "duplicate_item_id");
+                }
+
+                items.Add(item);
             }
 
-            start += pageCount;
+            // Progress check: startIndex must advance
             if (pageCount == 0)
             {
                 break;
             }
 
-            if (total is not null && start >= total.Value)
+            var newStart = start + pageCount;
+            if (newStart <= start)
             {
-                break;
+                throw new SafeErrorException(SafeError.Category.Http, "pagination_no_progress");
             }
 
-            if (pageCount < pageSize)
-            {
-                break;
-            }
+            start = newStart;
+            if (total is not null && start >= total.Value) break;
+            if (pageCount < pageSize) break;
         }
 
         if (total is not null && items.Count != total.Value)
         {
-            throw new InvalidDataException(
-                $"Item count mismatch: fetched {items.Count}, TotalRecordCount={total.Value}.");
+            throw new SafeErrorException(SafeError.Category.Http, "count_mismatch");
+        }
+
+        if (total is null)
+        {
+            Console.Error.WriteLine("http_warn:cannot_prove_snapshot_same_count");
         }
 
         return items;
     }
 
-    private static SourceItem ParseApiItem(JsonElement el)
+    internal static SourceItem ParseApiItem(JsonElement el)
     {
-        string? id = el.TryGetProperty("Id", out var idEl) ? idEl.GetString() : null;
-        string? albumId = null;
-        if (el.TryGetProperty("AlbumId", out var albumEl) && albumEl.ValueKind != JsonValueKind.Null)
-        {
-            albumId = albumEl.ToString();
-        }
+        OfflineItemsReader.RejectLogicalAliasDupesPublic(el);
 
-        string? path = el.TryGetProperty("Path", out var pathEl) ? pathEl.GetString() : null;
+        string? id = null;
+        string? albumId = null;
+        string? path = null;
+        var trackStatus = GainStatus.Missing;
+        var albumStatus = GainStatus.Missing;
         double? trackGain = null;
         double? albumGain = null;
-        if (el.TryGetProperty("NormalizationGain", out var ng) && ng.ValueKind == JsonValueKind.Number && ng.TryGetDouble(out var ngv))
+
+        foreach (var prop in el.EnumerateObject())
         {
-            trackGain = ngv;
+            switch (prop.Name)
+            {
+                case "Id":
+                    id = prop.Value.ValueKind == JsonValueKind.String ? prop.Value.GetString() : prop.Value.ToString();
+                    break;
+                case "AlbumId":
+                    if (prop.Value.ValueKind != JsonValueKind.Null)
+                    {
+                        albumId = prop.Value.ValueKind == JsonValueKind.String ? prop.Value.GetString() : prop.Value.ToString();
+                    }
+                    break;
+                case "Path":
+                    if (prop.Value.ValueKind != JsonValueKind.String)
+                    {
+                        throw new SafeErrorException(SafeError.Category.Json, "path_type");
+                    }
+                    path = prop.Value.GetString();
+                    break;
+                case "NormalizationGain":
+                {
+                    var g = GainParser.Parse(prop.Value);
+                    trackStatus = Map(g);
+                    trackGain = g.Value;
+                    break;
+                }
+                case "AlbumNormalizationGain":
+                {
+                    var g = GainParser.Parse(prop.Value);
+                    albumStatus = Map(g);
+                    albumGain = g.Value;
+                    break;
+                }
+                // unknown ignored
+            }
         }
 
-        if (el.TryGetProperty("AlbumNormalizationGain", out var ag) && ag.ValueKind == JsonValueKind.Number && ag.TryGetDouble(out var agv))
+        if (string.IsNullOrWhiteSpace(id) || path is null)
         {
-            albumGain = agv;
-        }
-
-        if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(path))
-        {
-            throw new InvalidDataException("API item missing Id or Path.");
+            throw new SafeErrorException(SafeError.Category.Json, "api_item_incomplete");
         }
 
         return new SourceItem
         {
             Id = id,
-            AlbumId = string.IsNullOrWhiteSpace(albumId) ? null : albumId,
+            AlbumId = albumId,
             Path = path,
             NormalizationGain = trackGain,
-            AlbumNormalizationGain = albumGain
+            AlbumNormalizationGain = albumGain,
+            TrackGainStatus = trackStatus,
+            AlbumGainStatus = albumStatus
         };
     }
 
+    private static GainStatus Map(GainParser.ParseResult g) => g.Kind switch
+    {
+        GainParser.ResultKind.Missing => GainStatus.Missing,
+        GainParser.ResultKind.Finite => GainStatus.Finite,
+        GainParser.ResultKind.NonFinite => GainStatus.NonFinite,
+        _ => GainStatus.InvalidType
+    };
+
     private async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
     {
-        var resp = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+        HttpResponseMessage resp;
+        try
+        {
+            resp = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+        }
+        catch (TaskCanceledException) when (!ct.IsCancellationRequested)
+        {
+            throw new SafeErrorException(SafeError.Category.Http, "timeout");
+        }
+
         if ((int)resp.StatusCode is >= 300 and < 400)
         {
             resp.Dispose();
-            throw new InvalidOperationException("Refusing to follow HTTP redirects (credential leak protection).");
+            throw new SafeErrorException(SafeError.Category.Http, "redirect_refused");
         }
 
         return resp;
@@ -224,17 +306,39 @@ internal sealed class JellyfinApiClient : IDisposable
 
     private static async Task EnsureSuccess(HttpResponseMessage resp)
     {
-        if (resp.IsSuccessStatusCode)
-        {
-            return;
-        }
-
+        if (resp.IsSuccessStatusCode) return;
         var code = (int)resp.StatusCode;
         resp.Dispose();
-        throw new InvalidOperationException($"Jellyfin HTTP {code}");
+        throw new SafeErrorException(SafeError.Category.Http, $"status_{code}");
     }
 
-    public void Dispose() => _http.Dispose();
+    private static async Task<byte[]> ReadBoundedAsync(HttpResponseMessage resp, CancellationToken ct)
+    {
+        await using var stream = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+        using var ms = new MemoryStream();
+        var buffer = new byte[8192];
+        long total = 0;
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+            var n = await stream.ReadAsync(buffer.AsMemory(0, buffer.Length), ct).ConfigureAwait(false);
+            if (n == 0) break;
+            total += n;
+            if (total > MaxResponseBytes)
+            {
+                throw new SafeErrorException(SafeError.Category.Http, "response_too_large");
+            }
+
+            ms.Write(buffer, 0, n);
+        }
+
+        return ms.ToArray();
+    }
+
+    public void Dispose()
+    {
+        if (_ownsClient) _http.Dispose();
+    }
 
     public static string ReadTokenMasked()
     {
@@ -251,18 +355,11 @@ internal sealed class JellyfinApiClient : IDisposable
 
             if (key.Key == ConsoleKey.Backspace)
             {
-                if (sb.Length > 0)
-                {
-                    sb.Length--;
-                }
-
+                if (sb.Length > 0) sb.Length--;
                 continue;
             }
 
-            if (!char.IsControl(key.KeyChar))
-            {
-                sb.Append(key.KeyChar);
-            }
+            if (!char.IsControl(key.KeyChar)) sb.Append(key.KeyChar);
         }
 
         return sb.ToString();

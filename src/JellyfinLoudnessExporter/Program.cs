@@ -4,25 +4,27 @@ static int Usage()
 {
     Console.Error.WriteLine(
 """
-Jellyfin Loudness Exporter — export portable loudness JSON from Jellyfin (or offline fixtures).
+Jellyfin Loudness Exporter — portable loudness JSON from Jellyfin or offline fixtures.
 
 Usage:
   jellyfin-loudness-exporter --selftest [--fixtures <dir>]
   jellyfin-loudness-exporter --offline <items.json> --root id=WindowsPath [--root ...] --output <out.json> [options]
-  jellyfin-loudness-exporter --api --base-url <url> --user-id <guid> --root id=WindowsPath [--root ...] --output <out.json> [options]
+  jellyfin-loudness-exporter --api --base-url <url> [--user-id <guid>] --root id=WindowsPath --output <out.json> [options]
 
 Options:
-  --partial                 Allow unmatched/collisions/rejects; set coverage.partial=true
-  --force                   Overwrite existing output file
-  --server-version <text>   Override/set source.serverVersion (offline default from file)
+  --partial                 Allow unmatched/collisions/rejects; coverage.partial=true
+  --force                   Replace existing output via atomic overwrite move
+  --server-version <text>   Set source.serverVersion when known (omit if unknown)
   --lufs-reference-hint     Include informational source.lufsDerivedReferenceLufs=-18
-  --user-id <guid>          Required for --api (Jellyfin /Items userId)
+  --allow-http              Allow http:// base URL (prints a warning). Prefer https.
+  --user-id <guid>          Optional for API-key mode; required when /Users/Me is unavailable
   --help                    Show help
 
-Security:
-  API token is read from a masked prompt into RAM only (never CLI args, config, log, or disk).
-  Base URL must not contain credentials. HTTP redirects are refused.
-  Export never contains server URL, token, username, or private absolute roots.
+Windows PowerShell examples (quote roots):
+  .\jellyfin-loudness-exporter.exe --offline .\fixtures\input-normal.json --root "music=C:\Music" --output .\out.json --lufs-reference-hint
+  .\jellyfin-loudness-exporter.exe --api --base-url "https://jellyfin.example/jellyfin" --user-id "..." --root "music=C:\Music" --output .\out.json
+
+Security: token from masked prompt only (never args/config/log/disk). No credentials in URLs. Redirects refused. Errors are safe categories only.
 """);
     return 2;
 }
@@ -44,28 +46,27 @@ try
     var api = args.Contains("--api", StringComparer.OrdinalIgnoreCase);
     if (offline is null && !api)
     {
-        Console.Error.WriteLine("Specify --offline <file>, --api, or --selftest.");
+        Console.Error.WriteLine(SafeError.Format(SafeError.Category.Usage, "mode_required"));
         return Usage();
     }
 
     if (offline is not null && api)
     {
-        Console.Error.WriteLine("Use only one of --offline or --api.");
+        Console.Error.WriteLine(SafeError.Format(SafeError.Category.Usage, "mode_conflict"));
         return 2;
     }
 
     var output = GetOpt(args, "--output");
     if (output is null)
     {
-        Console.Error.WriteLine("--output is required.");
+        Console.Error.WriteLine(SafeError.Format(SafeError.Category.Usage, "output_required"));
         return 2;
     }
 
     var rootArgs = GetOpts(args, "--root");
     if (rootArgs.Count == 0)
     {
-        // Default id music requires explicit path still — require at least one --root.
-        Console.Error.WriteLine("At least one --root id=WindowsPath is required (default id is typically music).");
+        Console.Error.WriteLine(SafeError.Format(SafeError.Category.Usage, "root_required"));
         return 2;
     }
 
@@ -73,34 +74,43 @@ try
     var partial = args.Contains("--partial", StringComparer.OrdinalIgnoreCase);
     var force = args.Contains("--force", StringComparer.OrdinalIgnoreCase);
     var lufsHint = args.Contains("--lufs-reference-hint", StringComparer.OrdinalIgnoreCase);
+    var allowHttp = args.Contains("--allow-http", StringComparer.OrdinalIgnoreCase);
     var serverVersionOverride = GetOpt(args, "--server-version");
 
-    string serverVersion;
+    string? serverVersion;
     List<SourceItem> items;
 
     if (offline is not null)
     {
         (serverVersion, items) = OfflineItemsReader.Read(offline);
-        if (serverVersionOverride is not null)
-        {
-            serverVersion = serverVersionOverride;
-        }
+        if (serverVersionOverride is not null) serverVersion = serverVersionOverride;
     }
     else
     {
         var baseUrl = GetOpt(args, "--base-url");
-        var userId = GetOpt(args, "--user-id");
-        if (baseUrl is null || userId is null)
+        if (baseUrl is null)
         {
-            Console.Error.WriteLine("--api requires --base-url and --user-id.");
+            Console.Error.WriteLine(SafeError.Format(SafeError.Category.Usage, "base_url_required"));
             return 2;
         }
 
+        if (allowHttp)
+        {
+            Console.Error.WriteLine("http_warn:non_https_base_url_allowed");
+        }
+
+        var userId = GetOpt(args, "--user-id");
         var token = JellyfinApiClient.ReadTokenMasked();
         try
         {
-            using var client = new JellyfinApiClient(baseUrl, token);
+            using var client = new JellyfinApiClient(baseUrl, token, allowHttp: allowHttp);
             serverVersion = serverVersionOverride ?? await client.GetServerVersionAsync(CancellationToken.None).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(userId))
+            {
+                userId = await client.TryGetUserIdFromMeAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+
+            // API-key mode: userId may remain null; server may still accept /Items.
             items = await client.FetchAudioItemsAsync(userId, CancellationToken.None).ConfigureAwait(false);
         }
         finally
@@ -113,20 +123,30 @@ try
     var result = builder.Build(items);
     if (!result.Success || result.Document is null)
     {
-        Console.Error.WriteLine($"Export blocked ({result.FailureCode}). Use --partial to write a partial file.");
+        Console.Error.WriteLine(SafeError.Format(SafeError.Category.Mapping, result.FailureCode ?? "export_blocked"));
         Console.Error.WriteLine(
-            $"coverage: seen={result.Coverage.ItemsSeen} unmatched={result.Coverage.Unmatched} collisions={result.Coverage.Collisions} rejected={result.Coverage.Rejected}");
+            $"coverage_summary:seen={result.Coverage.ItemsSeen};unmatched={result.Coverage.Unmatched};collisions={result.Coverage.Collisions};rejected={result.Coverage.Rejected}");
         return 1;
     }
 
     ExportWriter.WriteAtomic(result.Document, output, force);
     Console.WriteLine(
-        $"Wrote {result.Document.Coverage.EntriesExported} tracks (partial={result.Document.Coverage.Partial}) to {Path.GetFileName(Path.GetFullPath(output))}");
+        $"Wrote {result.Document.Coverage.EntriesExported} tracks (partial={result.Document.Coverage.Partial})");
     return 0;
 }
-catch (Exception ex)
+catch (SafeErrorException ex)
 {
-    Console.Error.WriteLine($"Error: {ex.Message}");
+    Console.Error.WriteLine(ex.Message);
+    return 1;
+}
+catch (OperationCanceledException)
+{
+    Console.Error.WriteLine(SafeError.Format(SafeError.Category.Http, "canceled"));
+    return 1;
+}
+catch (Exception)
+{
+    Console.Error.WriteLine(SafeError.Format(SafeError.Category.Internal, "unexpected"));
     return 1;
 }
 
@@ -169,11 +189,8 @@ static string FindDefaultFixtures()
     foreach (var c in candidates)
     {
         var full = Path.GetFullPath(c);
-        if (Directory.Exists(full))
-        {
-            return full;
-        }
+        if (Directory.Exists(full)) return full;
     }
 
-    throw new DirectoryNotFoundException("Could not locate tests/fixtures. Pass --fixtures <dir>.");
+    throw new SafeErrorException(SafeError.Category.Usage, "fixtures_not_found");
 }

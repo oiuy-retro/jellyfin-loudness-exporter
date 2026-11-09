@@ -1,50 +1,49 @@
 # Jellyfin Loudness Exporter
 
-Command-line tool that reads Jellyfin audio item loudness fields (or an offline fixture) and writes a portable UTF-8 JSON file for a music library that mirrors the same relative folder tree on another device.
+Command-line tool that reads Jellyfin audio loudness fields (or an offline fixture) and writes a portable UTF-8 (no BOM) JSON file for a library that mirrors the same relative folder tree elsewhere.
 
 This is not affiliated with the Jellyfin project. Stock Jellyfin has no native import for this file format; none is promised.
 
 ## What it does
 
-- Queries Jellyfin `GET /Items` for `Audio` items with `fields=Path`, or reads a SYNTHETIC/offline items JSON file.
-- Maps each item `Path` onto one or more named Windows roots you pass on the command line.
-- Writes `format=jellyfin-loudness-export` / `schemaVersion=1` JSON (see [docs/FORMAT.md](docs/FORMAT.md)).
-- Keeps API tokens in RAM from a masked prompt only (never CLI args, config files, logs, or disk).
-- Refuses to silently overwrite an existing output file (use `--force`).
+- Queries Jellyfin `GET /Items` for `Audio` with `fields=Path`, or reads offline items JSON under `tests/fixtures/`.
+- Maps each item `Path` onto named Windows roots passed as `--root id=WindowsPath`.
+- Writes `format=jellyfin-loudness-export` / `schemaVersion=1` (see [docs/FORMAT.md](docs/FORMAT.md)).
+- Collision keys use algorithm `jf-ck-v1`: ordinal `rootId` + Unicode 15.1 full case fold (C+F) after **runtime** NFC of the relative path. NFC is not a pinned cross-platform table; see FORMAT.md.
+- API token from a masked prompt into RAM only (never CLI args, config, log, or disk).
+- Atomic output via an exclusively created unique same-directory temp file; refuses silent overwrite (`--force` replaces without delete-then-move).
 
 ## Security and limitations
 
-- Read-only against Jellyfin HTTP APIs. No library scans, tag writes, or database changes.
-- Export files omit server URL, credentials, usernames, and absolute Windows roots. Relative paths remain and can reveal library structure.
-- Jellyfin may return network-substituted paths; only explicitly configured roots are matched.
-- Gains may come from LUFS analysis or ReplayGain tags; the API does not distinguish them. See FORMAT.md.
-- Missing gains are omitted (not written as zero). Entries with both gains missing may still be exported for coverage.
-- Windows execution and live Jellyfin servers are **not** verified in the automated tests here.
+- Read-only HTTP against Jellyfin. No scans, tag writes, or DB changes.
+- Export omits server URL, credentials, usernames, and absolute roots. Relative paths can still reveal structure.
+- Prefer `https`. `--allow-http` prints an explicit warning. Redirects are refused. Base URLs must not contain userinfo, query, or fragment; a missing trailing slash on an app prefix such as `/jellyfin` is normalized.
+- Errors print safe category codes only (no roots/URLs/tokens).
+- Windows execution and live Jellyfin servers are **not** verified by automated tests here.
 
 ## Run (offline)
 
 ```bash
 dotnet run --project src/JellyfinLoudnessExporter -c Release -- \
   --offline tests/fixtures/input-normal.json \
-  --root music=C:\Music \
+  --root 'music=C:\Music' \
   --output /tmp/loudness.json \
   --lufs-reference-hint
 ```
 
-## Run (API)
+### Windows PowerShell
 
-```bash
-dotnet run --project src/JellyfinLoudnessExporter -c Release -- \
-  --api --base-url https://jellyfin.example \
-  --user-id 00000000-0000-0000-0000-000000000000 \
-  --root music=C:\Music \
-  --output loudness.json \
-  --lufs-reference-hint
+```powershell
+.\jellyfin-loudness-exporter.exe --offline .\tests\fixtures\input-normal.json --root "music=C:\Music" --output .\loudness.json --lufs-reference-hint
 ```
 
-You will be prompted for the API token (hidden input).
+## Run (API)
 
-Add `--partial` to allow unmatched paths / collisions to produce a file with `coverage.partial=true`. Without it, those conditions block the export.
+```powershell
+.\jellyfin-loudness-exporter.exe --api --base-url "https://jellyfin.example/jellyfin" --user-id "00000000-0000-0000-0000-000000000000" --root "music=C:\Music" --output .\loudness.json --lufs-reference-hint
+```
+
+`--user-id` is optional when the token can resolve `/Users/Me` (user session). API-key mode may omit it if the server accepts `/Items` without `userId`.
 
 ## Self-test
 
@@ -52,27 +51,23 @@ Add `--partial` to allow unmatched paths / collisions to produce a file with `co
 dotnet run --project src/JellyfinLoudnessExporter -c Release -- --selftest
 ```
 
+Fixtures live in `tests/fixtures/` (all marked SYNTHETIC).
+
 Tested with .NET SDK `10.0.402` offline self-tests only. Windows hosts and real Jellyfin servers are not verified.
 
 ## Build
 
 See [docs/BUILDING.md](docs/BUILDING.md).
 
-## Jellyfin source pins
-
-Design checked against jellyfin/jellyfin commit `797999fc9bd49a9f0853916e2933e3ad06173503`:
-
-- DtoService gain and path mapping
-- AudioNormalizationTask LUFS persistence
-- Public `BaseItemDto` fields `NormalizationGain`, `AlbumNormalizationGain`, `Path`
-
 ## More documentation
 
-- [docs/FORMAT.md](docs/FORMAT.md) — schema contract
-- [docs/BUILDING.md](docs/BUILDING.md) — build and publish
+- [docs/FORMAT.md](docs/FORMAT.md)
+- [docs/BUILDING.md](docs/BUILDING.md)
 - [CHANGELOG.md](CHANGELOG.md)
 - [THIRD_PARTY.md](THIRD_PARTY.md)
 
 ## License
 
-License is pending an owner decision. See [LICENSE](LICENSE). Until a license is chosen, this project is not licensed for use, modification, or redistribution, and release binaries should not be published.
+[MIT](LICENSE). Copyright (c) 2026 oiuy-retro.
+
+Unicode Data Files remain under the Unicode Data Files and Software License; see [THIRD_PARTY.md](THIRD_PARTY.md) and `third_party/unicode-15.1.0/NOTICE.md`.
