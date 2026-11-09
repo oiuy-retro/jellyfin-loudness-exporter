@@ -18,15 +18,25 @@ SYNTHETIC examples use fake IDs and paths. Readers must ignore **unknown fields 
 | `tracks` | array | yes | Portable entries |
 | `coverage` | object | yes | Counts and safe error codes |
 
+## Primary matching identity
+
+Consumers match by **ordinal-exact `rootId` plus the exact original `relativePath`**,
+including case and Unicode form after separator conversion and root stripping.
+The collision key below is validation only; it is **not playback identity** and
+must not replace exact-path matching. Never match on basename alone.
+
 ## Collision keys (`jf-ck-v1`)
 
-Matching identity for collisions is **not** basename-only. For each successfully mapped track:
+Every producer claiming `collisionKeyAlgorithm="jf-ck-v1"` must apply this same
+collision gate and omit all members of a colliding group (or abort). Consumers
+retain exact-path primary matching regardless of this validation key.
+For each successfully mapped track:
 
 1. Store `relativePath` exactly (after `\`→`/` strip of the chosen root). **Do not** rewrite case or Unicode form of the stored path.
 2. Build collision key: `rootId` (**ordinal exact**, never case-folded) + `U+001F` + `FullCaseFold(NFC(relativePath))`.
 3. **Case fold:** Unicode 15.1.0 full default mapping, status **C+F only** (non-Turkic; status **T** excluded). Table vendored from https://www.unicode.org/Public/15.1.0/ucd/CaseFolding.txt
 4. **NFC:** performed by the **.NET runtime** `string.Normalize(FormC)`. This is **not** a pinned cross-platform normalization table. Different Unicode versions / platforms may NFC rare sequences differently. Do **not** claim bit-identical NFC across all platforms. Android may later pin its own NFC data; until then treat NFC as “runtime NFC” under `collisionKey.nfc`.
-5. Malformed UTF-16 (lone surrogates) fails closed.
+5. There is **no NFC normalization after folding**. Malformed UTF-16 (lone surrogates) fails closed.
 6. Shared vectors: `tests/fixtures/collision-key-vectors.json` (SYNTHETIC).
 
 `collisionKey` object fields:
@@ -48,16 +58,14 @@ Matching identity for collisions is **not** basename-only. For each successfully
 | `gainUnits` | yes | `dB` |
 | `lufsDerivedReferenceLufs` | no | Informational `-18` only; not a universal playback target |
 
-### Android producer (reserved; not emitted by this tool)
+### Android producer extension — RESERVED, not frozen
 
-| Field | Value |
-| --- | --- |
-| `kind` | `android-ebur128` |
-| `gainOrigin` | `measured-lufs` |
-| `gainUnits` | `dB` |
-| `serverVersion` | omit |
-| producer/version / `referenceLufs` | as Android defines |
-| per-track | `measuredLufs`, `truePeakDbtp`, optional `source` provenance |
+Exporter-only v1 does not implement Android importing or scanning. The proposed
+`android-ebur128` / `measured-lufs` producer, its producer/version fields,
+`referenceLufs`, and per-track provenance are **RESERVED and not a frozen Android
+schema**. No scanner support is claimed. A future Android producer would use dB,
+omit Jellyfin `serverVersion`, and specify its own measurement provenance before
+this extension is finalized. Consumers ignore unknown fields at all levels.
 
 `sourceItemId` is **required for Jellyfin** exports; optional for non-Jellyfin producers. It is **not** the match identity (match uses `rootId` + `relativePath`).
 
@@ -74,6 +82,9 @@ Matching identity for collisions is **not** basename-only. For each successfully
 | `sourceItemId` | Jellyfin: yes | |
 | `sourceAlbumId` | no | |
 | `trackGainDb` / `albumGainDb` | no | Omit if missing; finite only; not clamped |
+| `measuredLufs` | no; RESERVED | Not emitted or implemented by this exporter; Android extension not frozen |
+| `truePeakDbtp` | no; RESERVED | Not emitted or implemented by this exporter; Android extension not frozen |
+| `source` | no; RESERVED | Optional per-track provenance; not emitted; Android extension not frozen |
 
 ## `coverage`
 
@@ -100,6 +111,12 @@ Missing-gains-only complete exports keep `partial=false`.
 | Unmatched / collisions | Abort | Continue; set counts |
 
 Valid exports never contain JSON `NaN` / `Infinity` numbers.
+
+API fetching fails closed if any requested `TotalRecordCount` is missing, invalid,
+negative, changed across pages, or inconsistent with fetched items. An HTTP
+request deadline covers both headers and the entire bounded response body.
+Stable sorting and count checks do not provide a server-side snapshot: avoid
+library changes while exporting. No live-server snapshot guarantee is claimed.
 
 ## Example (SYNTHETIC)
 

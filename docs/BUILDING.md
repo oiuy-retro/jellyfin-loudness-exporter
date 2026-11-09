@@ -40,3 +40,13 @@ dotnet publish src/JellyfinLoudnessExporter/JellyfinLoudnessExporter.csproj -c R
 ## License
 
 MIT. See LICENSE. Unicode CaseFolding data: see THIRD_PARTY.md.
+
+## Packaged licenses
+
+Build and publish output include the project MIT license, `THIRD_PARTY.md`, and
+`notices/unicode/LICENSE.txt` (the full Unicode copyright and permission notice).
+Self-contained publish additionally copies `LICENSE.TXT` and
+`THIRD-PARTY-NOTICES.TXT` from the actual resolved .NET runtime/host packs into
+`notices/dotnet-runtime/` and `notices/dotnet-host/`. Keep these sidecar notices
+with the executable, even for a single-file build. A missing runtime notice
+fails publishing. No binaries or runtime packs belong in git.

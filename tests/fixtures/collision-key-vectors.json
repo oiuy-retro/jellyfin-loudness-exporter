@@ -80,6 +80,27 @@
       "relativePath": "𐐀/a.flac",
       "note": "SYNTHETIC",
       "expectedCollisionKey": "music\u001f𐐨/a.flac"
+    },
+    {
+      "name": "no_post_fold_nfc",
+      "rootId": "music",
+      "relativePath": "ǰ.flac",
+      "expectedCollisionKey": "music\u001fǰ.flac",
+      "note": "SYNTHETIC NFC before fold only"
+    },
+    {
+      "name": "dotted_I_exact",
+      "rootId": "music",
+      "relativePath": "İ.flac",
+      "expectedCollisionKey": "music\u001fi̇.flac",
+      "note": "SYNTHETIC non-Turkic full fold"
+    },
+    {
+      "name": "cherokee_fold_uppercase",
+      "rootId": "music",
+      "relativePath": "ꭰ.flac",
+      "expectedCollisionKey": "music\u001fᎠ.flac",
+      "note": "SYNTHETIC full fold is not lowercase"
     }
   ]
 }

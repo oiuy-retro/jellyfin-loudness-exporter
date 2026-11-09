@@ -7,7 +7,10 @@ This directory vendors `CaseFolding.txt` from Unicode Character Database 15.1.0:
 - Status letters used by this project: **C** and **F** only (full default case folding).
 - Status **T** (Turkic) mappings are intentionally excluded.
 
-Unicode Data Files and Software license terms apply:
-https://www.unicode.org/copyright.html
+The full Unicode License V3 copyright and permission notice is in
+`third_party/unicode-15.1.0/LICENSE.txt` in the source tree and
+`notices/unicode/LICENSE.txt` beside build/publish output. Do not distribute the
+embedded data without that notice. The data file's original copyright is retained.
+License source: https://www.unicode.org/license.txt
 
 Copyright © 1991-2023 Unicode, Inc.

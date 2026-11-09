@@ -1,0 +1,11 @@
+{
+  "serverVersion": "10.11.0-SYNTHETIC",
+  "items": [
+    {
+      "Id": "alias",
+      "Path": "C:\\Music\\a.flac",
+      "NormalizationGain": 1,
+      "trackGainDb": 2
+    }
+  ]
+}

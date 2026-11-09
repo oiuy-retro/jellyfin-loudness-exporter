@@ -15,7 +15,24 @@
   <ItemGroup>
     <None Include="..\..\tests\fixtures\**\*" Link="fixtures\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <EmbeddedResource Include="Data\CaseFolding-15.1.0.txt" LogicalName="JellyfinLoudnessExporter.Data.CaseFolding-15.1.0.txt" />
-    <None Include="Data\UNICODE_NOTICE.md" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Data\UNICODE_NOTICE.md" Link="notices\unicode\NOTICE.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <None Include="..\..\third_party\unicode-15.1.0\LICENSE.txt" Link="notices\unicode\LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <None Include="..\..\LICENSE" Link="LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <None Include="..\..\THIRD_PARTY.md" Link="THIRD_PARTY.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
   </ItemGroup>
+
+  <!-- Use notices from the actual resolved packs, not a stale or guessed SDK license. -->
+  <Target Name="CopyRuntimeLicenseNotices" AfterTargets="Publish" Condition="'$(SelfContained)' == 'true'">
+    <!-- This console project references only Microsoft.NETCore.App. The SDK may also
+         resolve unreferenced ASP.NET packs; do not require or misattribute those. -->
+    <Error Condition="'@(FrameworkReference)' != 'Microsoft.NETCore.App'" Text="Update license packaging for additional framework references." />
+    <ItemGroup>
+      <_ExporterRuntimePack Include="@(ResolvedRuntimePack)" Condition="'%(ResolvedRuntimePack.FrameworkName)' == 'Microsoft.NETCore.App'" />
+    </ItemGroup>
+    <Error Condition="'@(_ExporterRuntimePack)' == ''" Text="Self-contained publish requires resolved runtime notices." />
+    <Copy SourceFiles="@(_ExporterRuntimePack->'%(PackageDirectory)/LICENSE.TXT');@(_ExporterRuntimePack->'%(PackageDirectory)/THIRD-PARTY-NOTICES.TXT')" DestinationFolder="$(PublishDir)notices/dotnet-runtime/" />
+    <WriteLinesToFile File="$(PublishDir)notices/dotnet-runtime/PACK.txt" Lines="@(_ExporterRuntimePack->'%(NuGetPackageId) %(NuGetPackageVersion)')" Overwrite="true" />
+    <Copy SourceFiles="@(ResolvedAppHostPack->'%(PackageDirectory)/LICENSE.TXT');@(ResolvedAppHostPack->'%(PackageDirectory)/THIRD-PARTY-NOTICES.TXT')" DestinationFolder="$(PublishDir)notices/dotnet-host/" Condition="'@(ResolvedAppHostPack)' != ''" />
+  </Target>
 
 </Project>

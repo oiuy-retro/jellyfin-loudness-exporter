@@ -1,0 +1,10 @@
+{
+  "serverVersion": "10.11.0-SYNTHETIC",
+  "items": [
+    {
+      "Id": "b1",
+      "Path": "C:\\Music\\Sub\\File.mp3",
+      "NormalizationGain": 1
+    }
+  ]
+}

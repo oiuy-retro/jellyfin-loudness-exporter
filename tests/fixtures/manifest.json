@@ -1,0 +1,247 @@
+{
+  "SYNTHETIC": true,
+  "description": "Portable exporter inputs, complete expected exports, and expected safe error codes. All paths and IDs are synthetic. Ignore only exportedAt when comparing successful outputs.",
+  "cases": [
+    {
+      "name": "normal",
+      "input": "input-normal.json",
+      "roots": [
+        "music=C:\\Music"
+      ],
+      "partial": false,
+      "lufsReferenceHint": true,
+      "expectedExport": "expected-normal.json"
+    },
+    {
+      "name": "missing_track",
+      "input": "input-missing-track-gain.json",
+      "roots": [
+        "music=C:\\Music"
+      ],
+      "partial": false,
+      "lufsReferenceHint": true,
+      "expectedExport": "expected-missing-track.json"
+    },
+    {
+      "name": "missing_album",
+      "input": "input-missing-album-gain.json",
+      "roots": [
+        "music=C:\\Music"
+      ],
+      "partial": false,
+      "lufsReferenceHint": true,
+      "expectedExport": "expected-missing-album.json"
+    },
+    {
+      "name": "missing_both",
+      "input": "input-missing-both-gains.json",
+      "roots": [
+        "music=C:\\Music"
+      ],
+      "partial": false,
+      "lufsReferenceHint": true,
+      "expectedExport": "expected-missing-both.json"
+    },
+    {
+      "name": "unicode_preserved",
+      "input": "input-unicode-mixed.json",
+      "roots": [
+        "music=C:\\Music"
+      ],
+      "partial": false,
+      "lufsReferenceHint": true,
+      "expectedExport": "expected-unicode-mixed.json"
+    },
+    {
+      "name": "backslash",
+      "input": "input-backslash.json",
+      "roots": [
+        "music=C:\\Music"
+      ],
+      "partial": false,
+      "lufsReferenceHint": true,
+      "expectedExport": "expected-backslash.json"
+    },
+    {
+      "name": "traversal",
+      "input": "input-traversal.json",
+      "roots": [
+        "music=C:\\Music"
+      ],
+      "partial": false,
+      "lufsReferenceHint": true,
+      "expectedError": "dot_segment"
+    },
+    {
+      "name": "absolute_residual",
+      "input": "input-absolute-residual.json",
+      "roots": [
+        "music=C:\\Music"
+      ],
+      "partial": false,
+      "lufsReferenceHint": true,
+      "expectedError": "drive_residual"
+    },
+    {
+      "name": "overlapping_roots",
+      "input": "input-overlap-roots.json",
+      "roots": [
+        "music=C:\\Music",
+        "nested=C:\\Music\\Album"
+      ],
+      "partial": false,
+      "lufsReferenceHint": true,
+      "expectedError": "root_overlap"
+    },
+    {
+      "name": "dot_root",
+      "input": "input-dot-root.json",
+      "roots": [
+        "music=C:\\Other\\..\\Music"
+      ],
+      "partial": false,
+      "lufsReferenceHint": true,
+      "expectedError": "root_dot_segment"
+    },
+    {
+      "name": "bare_drive",
+      "input": "input-bare-drive.json",
+      "roots": [
+        "music=C:"
+      ],
+      "partial": false,
+      "lufsReferenceHint": true,
+      "expectedError": "root_not_absolute"
+    },
+    {
+      "name": "supplementary_root",
+      "input": "input-supplementary-root.json",
+      "roots": [
+        "music=C:\\𐐀"
+      ],
+      "partial": false,
+      "lufsReferenceHint": true,
+      "expectedExport": "expected-supplementary-root.json"
+    },
+    {
+      "name": "case_collision_complete",
+      "input": "input-case-collision.json",
+      "roots": [
+        "music=C:\\Music"
+      ],
+      "partial": false,
+      "lufsReferenceHint": true,
+      "expectedError": "collision"
+    },
+    {
+      "name": "case_collision_partial",
+      "input": "input-case-collision.json",
+      "roots": [
+        "music=C:\\Music"
+      ],
+      "partial": true,
+      "lufsReferenceHint": true,
+      "expectedExport": "expected-case-collision-partial.json"
+    },
+    {
+      "name": "unicode_collision_complete",
+      "input": "input-unicode-collision.json",
+      "roots": [
+        "music=C:\\Music"
+      ],
+      "partial": false,
+      "lufsReferenceHint": true,
+      "expectedError": "collision"
+    },
+    {
+      "name": "unicode_collision_partial",
+      "input": "input-unicode-collision.json",
+      "roots": [
+        "music=C:\\Music"
+      ],
+      "partial": true,
+      "lufsReferenceHint": true,
+      "expectedExport": "expected-unicode-collision-partial.json"
+    },
+    {
+      "name": "partial_unmatched",
+      "input": "input-partial-unmatched.json",
+      "roots": [
+        "music=C:\\Music"
+      ],
+      "partial": true,
+      "lufsReferenceHint": true,
+      "expectedExport": "expected-partial-unmatched.json"
+    },
+    {
+      "name": "out_of_range",
+      "input": "input-out-of-range.json",
+      "roots": [
+        "music=C:\\Music"
+      ],
+      "partial": false,
+      "lufsReferenceHint": true,
+      "expectedExport": "expected-out-of-range.json"
+    },
+    {
+      "name": "invalid_gains_partial",
+      "input": "input-invalid-gains.json",
+      "roots": [
+        "music=C:\\Music"
+      ],
+      "partial": true,
+      "lufsReferenceHint": true,
+      "expectedExport": "expected-invalid-gains-partial.json"
+    },
+    {
+      "name": "invalid_gains_complete",
+      "input": "input-invalid-gains.json",
+      "roots": [
+        "music=C:\\Music"
+      ],
+      "partial": false,
+      "lufsReferenceHint": true,
+      "expectedError": "invalid_gain_type"
+    },
+    {
+      "name": "overflow_partial",
+      "input": "input-numeric-overflow.json",
+      "roots": [
+        "music=C:\\Music"
+      ],
+      "partial": true,
+      "lufsReferenceHint": true,
+      "expectedExport": "expected-numeric-overflow-partial.json"
+    },
+    {
+      "name": "invalid_nan_number",
+      "input": "input-nonfinite-nan.json",
+      "roots": [
+        "music=C:\\Music"
+      ],
+      "partial": true,
+      "lufsReferenceHint": true,
+      "expectedError": "malformed_json"
+    },
+    {
+      "name": "alias_document_error",
+      "input": "input-alias-dupe.json",
+      "roots": [
+        "music=C:\\Music"
+      ],
+      "partial": true,
+      "lufsReferenceHint": true,
+      "expectedError": "track_gain_alias_dup"
+    },
+    {
+      "name": "unknown_input_fields",
+      "input": "input-unknown-field.json",
+      "roots": [
+        "music=C:\\Music"
+      ],
+      "partial": false,
+      "lufsReferenceHint": true,
+      "expectedExport": "expected-unknown-field.json"
+    }
+  ]
+}

@@ -2,8 +2,8 @@
 
 | Component | License | Notes |
 | --- | --- | --- |
-| .NET runtime / SDK libraries | Microsoft .NET Library License | Not redistributed in source. A self-contained publish may include runtime files produced by the SDK. |
-| Unicode Character Database `CaseFolding.txt` 15.1.0 | Unicode Data Files and Software License | Vendored under `third_party/unicode-15.1.0/` and embedded for collision keys. See that directory's `NOTICE.md`. Source: https://www.unicode.org/Public/15.1.0/ucd/CaseFolding.txt (SHA-256 `4e55acfdc32825a22e87670e9056a3bf94ad7c5400065778e9e10f8314372bcf`). |
+| .NET runtime | MIT and component-specific third-party terms | Not vendored in source. Self-contained publish copies the resolved runtime pack’s own `LICENSE.TXT` and `THIRD-PARTY-NOTICES.TXT` to `notices/dotnet-runtime/`, and host pack notices to `notices/dotnet-host/`. These notices, not a blanket library license, describe the redistributed components. |
+| Unicode Character Database `CaseFolding.txt` 15.1.0 | Unicode License V3 | Vendored under `third_party/unicode-15.1.0/` and embedded for collision keys. See that directory's `NOTICE.md` and complete `LICENSE.txt`. The full license is copied to `notices/unicode/LICENSE.txt` for both build and publish output. Source: https://www.unicode.org/Public/15.1.0/ucd/CaseFolding.txt (SHA-256 `4e55acfdc32825a22e87670e9056a3bf94ad7c5400065778e9e10f8314372bcf`). |
 
 No other third-party NuGet packages are referenced.
 

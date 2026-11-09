@@ -91,7 +91,13 @@ internal static class PathMapper
             throw new SafeErrorException(SafeError.Category.Usage, "root_path_empty");
         }
 
-        // Preserve drive root form: C: -> C:/  and C:\ -> C:/
+        // Preserve an explicitly absolute drive root. Bare C: is drive-relative on Windows.
+        if (path.Length == 2 && char.IsAsciiLetter(path[0]) && path[1] == ':')
+        {
+            throw new SafeErrorException(SafeError.Category.Usage, "root_not_absolute");
+        }
+
+        // C:\ and C:/ normalize to C:/.
         if (trimmedSep.Length == 2 && char.IsAsciiLetter(trimmedSep[0]) && trimmedSep[1] == ':')
         {
             return char.ToUpperInvariant(trimmedSep[0]) + ":/";
@@ -154,17 +160,6 @@ internal static class PathMapper
         }
 
         if (path.Length >= 3 && char.IsAsciiLetter(path[0]) && path[1] == ':' && (path[2] == '\\' || path[2] == '/'))
-        {
-            return true;
-        }
-
-        // Bare drive root C: or C:\
-        if (path.Length == 2 && char.IsAsciiLetter(path[0]) && path[1] == ':')
-        {
-            return true;
-        }
-
-        if (path.Length == 3 && char.IsAsciiLetter(path[0]) && path[1] == ':' && (path[2] == '\\' || path[2] == '/'))
         {
             return true;
         }
@@ -271,22 +266,9 @@ internal static class PathMapper
             return new MapResult { Status = MapStatus.Unmatched, ErrorCode = "unmatched_root" };
         }
 
-        // Direct slice by prefix length after OrdinalIgnoreCase match (prefix lengths equal in UTF-16 for ASCII drive roots).
-        // For safety, verify character-by-character ignore-case then slice original unified source.
+        // OrdinalIgnoreCase handles supplementary case pairs as complete Unicode scalars.
+        // Do not re-check UTF-16 code units with char casing; slice after the successful match.
         var prefix = matched.NormalizedPrefix;
-        if (unified.Length < prefix.Length)
-        {
-            return new MapResult { Status = MapStatus.Rejected, ErrorCode = "prefix_length" };
-        }
-
-        for (var i = 0; i < prefix.Length; i++)
-        {
-            if (!CharEqualsIgnoreCase(unified[i], prefix[i]))
-            {
-                return new MapResult { Status = MapStatus.Rejected, ErrorCode = "prefix_mismatch" };
-            }
-        }
-
         var relative = unified[prefix.Length..]; // preserve exact residual case/Unicode
         var validation = ValidateRelative(relative);
         if (validation is not null)
@@ -312,9 +294,6 @@ internal static class PathMapper
             CollisionKey = collisionKey
         };
     }
-
-    private static bool CharEqualsIgnoreCase(char a, char b) =>
-        a == b || char.ToUpperInvariant(a) == char.ToUpperInvariant(b);
 
     public static string? ValidateRelative(string relative)
     {

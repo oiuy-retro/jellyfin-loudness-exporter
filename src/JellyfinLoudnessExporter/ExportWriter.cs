@@ -48,11 +48,10 @@ internal static class ExportWriter
         string? tmp = null;
         try
         {
-            tmp = CreateExclusiveTempFile(dir);
-            RefuseSymlink(tmp, "temp");
-
-            using (var fs = new FileStream(tmp, FileMode.Open, FileAccess.Write, FileShare.None))
+            // Keep the exclusively created stream; never reopen a potentially replaced pathname.
+            using (var fs = CreateExclusiveTempFile(dir))
             {
+                tmp = fs.Name;
                 fs.Write(bytes, 0, bytes.Length);
                 fs.Flush(flushToDisk: true);
             }
@@ -65,7 +64,7 @@ internal static class ExportWriter
                     throw new SafeErrorException(SafeError.Category.Io, "Output file appeared during write; refusing to overwrite.");
                 }
 
-                // Atomic-ish replace: Move with overwrite where supported; never delete-then-move.
+                // Same-directory overwrite move; never delete-then-move. Windows behavior still needs device verification.
                 File.Move(tmp, full, overwrite: true);
                 tmp = null;
             }
@@ -89,22 +88,20 @@ internal static class ExportWriter
         }
     }
 
-    internal static string CreateExclusiveTempFile(string directory)
+    internal static FileStream CreateExclusiveTempFile(string directory)
     {
         for (var attempt = 0; attempt < 32; attempt++)
         {
             var name = Path.Combine(directory, $".jle-{Guid.NewGuid():N}.tmp");
             try
             {
-                using var fs = new FileStream(
+                return new FileStream(
                     name,
                     FileMode.CreateNew,
                     FileAccess.Write,
                     FileShare.None,
                     bufferSize: 4096,
                     FileOptions.None);
-                // Owned empty file created exclusively.
-                return name;
             }
             catch (IOException)
             {

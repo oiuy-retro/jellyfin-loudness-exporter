@@ -20,6 +20,9 @@ This is not affiliated with the Jellyfin project. Stock Jellyfin has no native i
 - Prefer `https`. `--allow-http` prints an explicit warning. Redirects are refused. Base URLs must not contain userinfo, query, or fragment; a missing trailing slash on an app prefix such as `/jellyfin` is normalized.
 - Errors print safe category codes only (no roots/URLs/tokens).
 - Windows execution and live Jellyfin servers are **not** verified by automated tests here.
+- Each HTTP request has a two-minute header-and-body deadline and a 64 MiB response cap. Missing/invalid/changed totals abort instead of claiming a complete export. Avoid library changes while exporting; count checks are not a server-side snapshot.
+- Choose an output directory you control; do not use a directory writable by untrusted users. Keep the adjacent license notices when distributing builds.
+- Exporter-only v1 does not implement Android importing or scanning. Reserved Android fields are not a frozen scanner contract.
 
 ## Run (offline)
 
@@ -70,4 +73,4 @@ See [docs/BUILDING.md](docs/BUILDING.md).
 
 [MIT](LICENSE). Copyright (c) 2026 oiuy-retro.
 
-Unicode Data Files remain under the Unicode Data Files and Software License; see [THIRD_PARTY.md](THIRD_PARTY.md) and `third_party/unicode-15.1.0/NOTICE.md`.
+Unicode Data Files remain under Unicode License V3; see [THIRD_PARTY.md](THIRD_PARTY.md) and `third_party/unicode-15.1.0/NOTICE.md`.

@@ -12,7 +12,7 @@ internal sealed class JellyfinApiClient : IDisposable
 
     private readonly HttpClient _http;
     private readonly bool _ownsClient;
-    private readonly bool _allowHttp;
+    private readonly TimeSpan _requestTimeout;
 
     public JellyfinApiClient(string baseUrl, string token, HttpMessageHandler? handler = null, bool allowHttp = false, TimeSpan? timeout = null)
     {
@@ -21,7 +21,11 @@ internal sealed class JellyfinApiClient : IDisposable
             throw new SafeErrorException(SafeError.Category.Usage, "token_required");
         }
 
-        _allowHttp = allowHttp;
+        _requestTimeout = timeout ?? DefaultTimeout;
+        if (_requestTimeout <= TimeSpan.Zero || _requestTimeout.TotalMilliseconds > uint.MaxValue - 1)
+        {
+            throw new SafeErrorException(SafeError.Category.Usage, "timeout_invalid");
+        }
         var baseUri = NormalizeBaseUri(baseUrl, allowHttp);
 
         if (handler is null)
@@ -36,7 +40,7 @@ internal sealed class JellyfinApiClient : IDisposable
 
         _http = new HttpClient(handler, disposeHandler: true)
         {
-            Timeout = timeout ?? DefaultTimeout,
+            Timeout = Timeout.InfiniteTimeSpan, // linked request deadline covers headers AND streamed body
             BaseAddress = baseUri
         };
         _http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
@@ -92,9 +96,7 @@ internal sealed class JellyfinApiClient : IDisposable
 
     public async Task<string?> GetServerVersionAsync(CancellationToken ct)
     {
-        using var resp = await SendAsync(new HttpRequestMessage(HttpMethod.Get, "System/Info/Public"), ct).ConfigureAwait(false);
-        await EnsureSuccess(resp).ConfigureAwait(false);
-        var bytes = await ReadBoundedAsync(resp, ct).ConfigureAwait(false);
+        var (_, bytes) = await GetResponseBytesAsync("System/Info/Public", ct).ConfigureAwait(false);
         OfflineItemsReader.RejectDuplicateProperties(bytes);
         using var doc = JsonDocument.Parse(bytes);
         if (doc.RootElement.TryGetProperty("Version", out var v) && v.ValueKind == JsonValueKind.String)
@@ -107,13 +109,13 @@ internal sealed class JellyfinApiClient : IDisposable
 
     public async Task<string?> TryGetUserIdFromMeAsync(CancellationToken ct)
     {
-        using var resp = await SendAsync(new HttpRequestMessage(HttpMethod.Get, "Users/Me"), ct).ConfigureAwait(false);
-        if (resp.StatusCode != HttpStatusCode.OK)
+        var (status, bytes) = await GetResponseBytesAsync("Users/Me", ct, allowNonSuccess: true).ConfigureAwait(false);
+        if (status != HttpStatusCode.OK)
         {
             return null;
         }
 
-        var bytes = await ReadBoundedAsync(resp, ct).ConfigureAwait(false);
+        OfflineItemsReader.RejectDuplicateProperties(bytes);
         using var doc = JsonDocument.Parse(bytes);
         return doc.RootElement.TryGetProperty("Id", out var id) ? id.GetString() : null;
     }
@@ -125,7 +127,6 @@ internal sealed class JellyfinApiClient : IDisposable
         int? total = null;
         var items = new List<SourceItem>();
         var seenIds = new HashSet<string>(StringComparer.Ordinal);
-        var warnedSnapshot = false;
 
         while (true)
         {
@@ -139,9 +140,7 @@ internal sealed class JellyfinApiClient : IDisposable
                 qs.Append("&userId=").Append(Uri.EscapeDataString(userId));
             }
 
-            using var resp = await SendAsync(new HttpRequestMessage(HttpMethod.Get, qs.ToString()), ct).ConfigureAwait(false);
-            await EnsureSuccess(resp).ConfigureAwait(false);
-            var bytes = await ReadBoundedAsync(resp, ct).ConfigureAwait(false);
+            var (_, bytes) = await GetResponseBytesAsync(qs.ToString(), ct).ConfigureAwait(false);
             OfflineItemsReader.RejectDuplicateProperties(bytes);
 
             using var doc = JsonDocument.Parse(bytes);
@@ -151,18 +150,16 @@ internal sealed class JellyfinApiClient : IDisposable
                 throw new SafeErrorException(SafeError.Category.Http, "items_missing");
             }
 
-            if (root.TryGetProperty("TotalRecordCount", out var totalEl) && totalEl.TryGetInt32(out var t))
+            if (!root.TryGetProperty("TotalRecordCount", out var totalEl) ||
+                totalEl.ValueKind != JsonValueKind.Number || !totalEl.TryGetInt32(out var t) || t < 0)
             {
-                if (total is null) total = t;
-                else if (total.Value != t)
-                {
-                    throw new SafeErrorException(SafeError.Category.Http, "total_changed");
-                }
+                throw new SafeErrorException(SafeError.Category.Http, "total_missing_or_invalid");
             }
-            else if (!warnedSnapshot)
+
+            if (total is null) total = t;
+            else if (total.Value != t)
             {
-                warnedSnapshot = true;
-                Console.Error.WriteLine("http_warn:total_missing_cannot_prove_snapshot");
+                throw new SafeErrorException(SafeError.Category.Http, "total_changed");
             }
 
             var pageCount = 0;
@@ -198,11 +195,6 @@ internal sealed class JellyfinApiClient : IDisposable
         if (total is not null && items.Count != total.Value)
         {
             throw new SafeErrorException(SafeError.Category.Http, "count_mismatch");
-        }
-
-        if (total is null)
-        {
-            Console.Error.WriteLine("http_warn:cannot_prove_snapshot_same_count");
         }
 
         return items;
@@ -283,37 +275,43 @@ internal sealed class JellyfinApiClient : IDisposable
         _ => GainStatus.InvalidType
     };
 
-    private async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+    // One deadline owns the complete request, including response stream creation and every body read.
+    private async Task<(HttpStatusCode Status, byte[] Bytes)> GetResponseBytesAsync(
+        string relative, CancellationToken ct, bool allowNonSuccess = false)
     {
-        HttpResponseMessage resp;
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadline.CancelAfter(_requestTimeout);
         try
         {
-            resp = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+            using var request = new HttpRequestMessage(HttpMethod.Get, relative);
+            using var resp = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token).ConfigureAwait(false);
+            if ((int)resp.StatusCode is >= 300 and < 400)
+            {
+                throw new SafeErrorException(SafeError.Category.Http, "redirect_refused");
+            }
+
+            if (!resp.IsSuccessStatusCode)
+            {
+                if (allowNonSuccess) return (resp.StatusCode, []); // never log or read error bodies
+                throw new SafeErrorException(SafeError.Category.Http, $"status_{(int)resp.StatusCode}");
+            }
+
+            var bytes = await ReadBoundedAsync(resp, deadline.Token).ConfigureAwait(false);
+            return (resp.StatusCode, bytes);
         }
-        catch (TaskCanceledException) when (!ct.IsCancellationRequested)
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested && deadline.IsCancellationRequested)
         {
             throw new SafeErrorException(SafeError.Category.Http, "timeout");
         }
-
-        if ((int)resp.StatusCode is >= 300 and < 400)
-        {
-            resp.Dispose();
-            throw new SafeErrorException(SafeError.Category.Http, "redirect_refused");
-        }
-
-        return resp;
-    }
-
-    private static async Task EnsureSuccess(HttpResponseMessage resp)
-    {
-        if (resp.IsSuccessStatusCode) return;
-        var code = (int)resp.StatusCode;
-        resp.Dispose();
-        throw new SafeErrorException(SafeError.Category.Http, $"status_{code}");
     }
 
     private static async Task<byte[]> ReadBoundedAsync(HttpResponseMessage resp, CancellationToken ct)
     {
+        if (resp.Content.Headers.ContentLength is long length && length > MaxResponseBytes)
+        {
+            throw new SafeErrorException(SafeError.Category.Http, "response_too_large");
+        }
+
         await using var stream = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
         using var ms = new MemoryStream();
         var buffer = new byte[8192];

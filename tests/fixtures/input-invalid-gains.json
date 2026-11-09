@@ -1,0 +1,25 @@
+{
+  "serverVersion": "10.11.0-SYNTHETIC",
+  "items": [
+    {
+      "Id": "bool",
+      "Path": "C:\\Music\\a.flac",
+      "NormalizationGain": true
+    },
+    {
+      "Id": "string",
+      "Path": "C:\\Music\\b.flac",
+      "NormalizationGain": "2"
+    },
+    {
+      "Id": "nan",
+      "Path": "C:\\Music\\c.flac",
+      "NormalizationGain": "NaN"
+    },
+    {
+      "Id": "good",
+      "Path": "C:\\Music\\d.flac",
+      "NormalizationGain": 1
+    }
+  ]
+}

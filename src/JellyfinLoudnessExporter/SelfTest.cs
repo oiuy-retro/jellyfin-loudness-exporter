@@ -9,7 +9,7 @@ internal static class SelfTest
 {
     public static int Run(string fixturesDir)
     {
-        var failed = 0;
+        var failed = RegressionTests.Run(fixturesDir);
         failed += Check("normal", () => CaseNormal(fixturesDir));
         failed += Check("missing_gains", () => CaseMissingGains(fixturesDir));
         failed += Check("backslash", () => CaseBackslash());
@@ -42,7 +42,7 @@ internal static class SelfTest
         failed += Check("shared_valid_export_schema", () => CaseSharedValid(fixturesDir));
         failed += Check("http_normalize_slash", () => CaseHttpNormalizeSlash());
         failed += Check("http_reject_userinfo", () => CaseHttpUserInfo());
-        failed += Check("http_pagination_fake", () => CaseHttpPaginationFake());
+        failed += Check("http_single_page_fake", () => CaseHttpSinglePageFake());
         failed += Check("http_redirect_refused", () => CaseHttpRedirect());
         failed += Check("http_invalid_gain", () => CaseHttpInvalidGain());
         failed += Check("collision_vectors_file", () => CaseCollisionVectors(fixturesDir));
@@ -393,11 +393,8 @@ internal static class SelfTest
 
     private static void CaseSharedValid(string fixturesDir)
     {
-        using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(fixturesDir, "shared-valid-export.json")));
-        var root = doc.RootElement;
-        if (root.GetProperty("format").GetString() != "jellyfin-loudness-export") throw new Exception("format");
-        if (root.GetProperty("schemaVersion").GetInt32() != 1) throw new Exception("ver");
-        if (!root.TryGetProperty("tracks", out _) || !root.TryGetProperty("coverage", out _)) throw new Exception("shape");
+        ContractAssertions.Validate(File.ReadAllBytes(Path.Combine(fixturesDir, "shared-valid-export.json")));
+        ContractAssertions.Validate(File.ReadAllBytes(Path.Combine(fixturesDir, "shared-future-fields-export.json")));
     }
 
     private static void CaseHttpNormalizeSlash()
@@ -416,7 +413,7 @@ internal static class SelfTest
         catch (SafeErrorException ex) when (ex.Code == "base_url_userinfo") { }
     }
 
-    private static void CaseHttpPaginationFake()
+    private static void CaseHttpSinglePageFake()
     {
         var calls = 0;
         var handler = new FakeHttpHandler
@@ -516,10 +513,6 @@ internal static class SelfTest
     {
         var (ver, items) = OfflineItemsReader.Read(Path.Combine(fixturesDir, "input-normal.json"));
         var doc = new ExportBuilder(MusicRoot(), false, ver, true).Build(items).Document!;
-        // Compare tracks to expected; ignore exportedAt timestamp by overlay
-        using var expected = JsonDocument.Parse(File.ReadAllText(Path.Combine(fixturesDir, "expected-normal.json")));
-        var expTrack = expected.RootElement.GetProperty("tracks")[0];
-        if (expTrack.GetProperty("relativePath").GetString() != doc.Tracks[0].RelativePath) throw new Exception("path");
-        if (Math.Abs(expTrack.GetProperty("trackGainDb").GetDouble() - doc.Tracks[0].TrackGainDb!.Value) > 1e-9) throw new Exception("gain");
+        ContractAssertions.CompareAllStableFields(doc, Path.Combine(fixturesDir, "expected-normal.json"));
     }
 }

@@ -1,0 +1,26 @@
+{
+  "serverVersion": "10.11.0-SYNTHETIC",
+  "items": [
+    {
+      "Id": "u1",
+      "Path": "C:\\Music\\Artist\\Café\\Song.flac",
+      "NormalizationGain": 0
+    },
+    {
+      "Id": "u2",
+      "Path": "C:\\Music\\Artist\\İ\\SINGLE.flac",
+      "NormalizationGain": -2,
+      "AlbumNormalizationGain": -1
+    },
+    {
+      "Id": "u3",
+      "Path": "C:\\Music\\𐐀\\Tune.flac",
+      "NormalizationGain": 1
+    },
+    {
+      "Id": "u4",
+      "Path": "C:\\Music\\Case\\MiXeD.flac",
+      "NormalizationGain": 3
+    }
+  ]
+}

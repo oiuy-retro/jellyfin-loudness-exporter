@@ -1,0 +1,21 @@
+{
+  "serverVersion": "10.11.0-SYNTHETIC",
+  "items": [
+    {
+      "Id": "range1",
+      "Path": "C:\\Music\\a.flac",
+      "NormalizationGain": 40
+    },
+    {
+      "Id": "range2",
+      "Path": "C:\\Music\\b.flac",
+      "NormalizationGain": -30,
+      "AlbumNormalizationGain": 30
+    },
+    {
+      "Id": "range3",
+      "Path": "C:\\Music\\c.flac",
+      "AlbumNormalizationGain": -30.1
+    }
+  ]
+}

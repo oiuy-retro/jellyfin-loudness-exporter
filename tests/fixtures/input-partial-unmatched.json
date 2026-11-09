@@ -1,0 +1,15 @@
+{
+  "serverVersion": "10.11.0-SYNTHETIC",
+  "items": [
+    {
+      "Id": "ok",
+      "Path": "C:\\Music\\A\\a.flac",
+      "NormalizationGain": 1
+    },
+    {
+      "Id": "bad",
+      "Path": "D:\\Nope\\b.flac",
+      "NormalizationGain": 1
+    }
+  ]
+}
