@@ -1,0 +1,2 @@
+SYNTHETIC raw invalid JSON for parser rejection (NaN is not valid JSON):
+{"serverVersion":"10.11.0-SYNTHETIC","SYNTHETIC":true,"items":[{"Id":"ffff","Path":"C:\\Music\\a.flac","NormalizationGain":NaN}]}

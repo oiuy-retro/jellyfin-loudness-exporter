@@ -1,0 +1,12 @@
+{
+  "serverVersion": "10.11.0-SYNTHETIC",
+  "SYNTHETIC": true,
+  "items": [
+    {
+      "Id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "AlbumId": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+      "Path": "C:\\Music\\A\\t.flac",
+      "AlbumNormalizationGain": -0.5
+    }
+  ]
+}

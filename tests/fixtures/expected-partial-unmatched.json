@@ -1,0 +1,10 @@
+{
+  "SYNTHETIC": true,
+  "note": "Illustrative expected coverage for unmatched-in-partial mode; selftest builds this case in code.",
+  "coverage": {
+    "partial": true,
+    "itemsSeen": 2,
+    "entriesExported": 1,
+    "unmatched": 1
+  }
+}
