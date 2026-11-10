@@ -44,6 +44,7 @@ internal static class SelfTest
         failed += Check("http_reject_userinfo", () => CaseHttpUserInfo());
         failed += Check("http_single_page_fake", () => CaseHttpSinglePageFake());
         failed += Check("http_redirect_refused", () => CaseHttpRedirect());
+        failed += Check("http_unreachable", () => CaseHttpUnreachable());
         failed += Check("http_invalid_gain", () => CaseHttpInvalidGain());
         failed += Check("collision_vectors_file", () => CaseCollisionVectors(fixturesDir));
         failed += Check("perf_100k", () => CasePerf100k());
@@ -433,6 +434,23 @@ internal static class SelfTest
         using var client = new JellyfinApiClient("https://example.com/", "token", handler);
         var items = client.FetchAudioItemsAsync(null, CancellationToken.None).GetAwaiter().GetResult();
         if (items.Count != 2) throw new Exception("count " + items.Count);
+    }
+
+    private sealed class UnreachableHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => throw new HttpRequestException("unreachable");
+    }
+
+    private static void CaseHttpUnreachable()
+    {
+        using var client = new JellyfinApiClient("https://example.com/", "token", new UnreachableHandler());
+        try
+        {
+            client.GetServerVersionAsync(CancellationToken.None).GetAwaiter().GetResult();
+            throw new Exception("should report unreachable");
+        }
+        catch (SafeErrorException ex) when (ex.Code == "unreachable") { }
     }
 
     private static void CaseHttpRedirect()

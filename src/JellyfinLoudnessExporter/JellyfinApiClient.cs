@@ -303,6 +303,11 @@ internal sealed class JellyfinApiClient : IDisposable
         {
             throw new SafeErrorException(SafeError.Category.Http, "timeout");
         }
+        catch (HttpRequestException)
+        {
+            // DNS failure, connection refused, and TLS errors land here. The message can contain the host, so it is not printed.
+            throw new SafeErrorException(SafeError.Category.Http, "unreachable");
+        }
     }
 
     private static async Task<byte[]> ReadBoundedAsync(HttpResponseMessage resp, CancellationToken ct)
