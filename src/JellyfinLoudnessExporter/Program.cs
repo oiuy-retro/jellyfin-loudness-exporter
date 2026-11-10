@@ -9,6 +9,7 @@ Jellyfin Loudness Exporter — portable loudness JSON from Jellyfin or offline f
 Usage:
   jellyfin-loudness-exporter --selftest [--fixtures <dir>]
   jellyfin-loudness-exporter --offline <items.json> --root id=WindowsPath [--root ...] --output <out.json> [options]
+  jellyfin-loudness-exporter --database <jellyfin.db> --root id=WindowsPath [--root ...] --output <out.json> [options]
   jellyfin-loudness-exporter --api --base-url <url> [--user-id <guid>] --root id=WindowsPath --output <out.json> [options]
 
 Options:
@@ -22,6 +23,7 @@ Options:
 
 Windows PowerShell examples (quote roots):
   .\jellyfin-loudness-exporter.exe --offline .\fixtures\input-normal.json --root "music=C:\Music" --output .\out.json --lufs-reference-hint
+  .\jellyfin-loudness-exporter.exe --database .\jellyfin.db --root "music=C:\Music" --output .\out.json --lufs-reference-hint
   .\jellyfin-loudness-exporter.exe --api --base-url "https://jellyfin.example/jellyfin" --user-id "..." --root "music=C:\Music" --output .\out.json
 
 Security: token from masked prompt only (never args/config/log/disk). No credentials in URLs. Redirects refused. Errors are safe categories only.
@@ -43,14 +45,16 @@ try
     }
 
     var offline = GetOpt(args, "--offline");
+    var database = GetOpt(args, "--database");
     var api = args.Contains("--api", StringComparer.OrdinalIgnoreCase);
-    if (offline is null && !api)
+    var modeCount = (offline is not null ? 1 : 0) + (database is not null ? 1 : 0) + (api ? 1 : 0);
+    if (modeCount == 0)
     {
         Console.Error.WriteLine(SafeError.Format(SafeError.Category.Usage, "mode_required"));
         return Usage();
     }
 
-    if (offline is not null && api)
+    if (modeCount > 1)
     {
         Console.Error.WriteLine(SafeError.Format(SafeError.Category.Usage, "mode_conflict"));
         return 2;
@@ -79,11 +83,18 @@ try
 
     string? serverVersion;
     List<SourceItem> items;
+    var sourceKind = "jellyfin-api";
 
     if (offline is not null)
     {
         (serverVersion, items) = OfflineItemsReader.Read(offline);
         if (serverVersionOverride is not null) serverVersion = serverVersionOverride;
+    }
+    else if (database is not null)
+    {
+        serverVersion = serverVersionOverride;
+        items = JellyfinDatabaseReader.Read(database);
+        sourceKind = "jellyfin-database";
     }
     else
     {
@@ -119,7 +130,7 @@ try
         }
     }
 
-    var builder = new ExportBuilder(roots, partial, serverVersion, lufsHint);
+    var builder = new ExportBuilder(roots, partial, serverVersion, lufsHint, sourceKind);
     var result = builder.Build(items);
     if (!result.Success || result.Document is null)
     {

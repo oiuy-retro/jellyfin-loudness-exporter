@@ -52,7 +52,7 @@ For each successfully mapped track:
 
 | Field | Required | Notes |
 | --- | --- | --- |
-| `kind` | yes | `jellyfin-api` |
+| `kind` | yes | `jellyfin-api` for the HTTP reader, or `jellyfin-database` for a read-only local `jellyfin.db`. Both use the same gain rule: LUFS when present (`-18` minus LUFS), otherwise the stored normalization gain. Album gain is the parent album's value. |
 | `gainOrigin` | yes | `lufs-or-replaygain-unspecified` |
 | `serverVersion` | no | Actual version when known; **omit** if unknown (never fabricate) |
 | `gainUnits` | yes | `dB` |

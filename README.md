@@ -6,7 +6,7 @@ This is not affiliated with the Jellyfin project. Stock Jellyfin has no native i
 
 ## What it does
 
-- Queries Jellyfin `GET /Items` for `Audio` with `fields=Path`, or reads offline items JSON under `tests/fixtures/`.
+- Queries Jellyfin `GET /Items` for `Audio` with `fields=Path`, reads a local `jellyfin.db` read-only, or reads offline items JSON under `tests/fixtures/`.
 - Maps each item `Path` onto named Windows roots passed as `--root id=WindowsPath`.
 - Writes `format=jellyfin-loudness-export` / `schemaVersion=1` (see [docs/FORMAT.md](docs/FORMAT.md)).
 - Collision keys use algorithm `jf-ck-v1`: ordinal `rootId` + Unicode 15.1 full case fold (C+F) after **runtime** NFC of the relative path. NFC is not a pinned cross-platform table; see FORMAT.md.
@@ -47,6 +47,14 @@ dotnet run --project src/JellyfinLoudnessExporter -c Release -- \
 ```
 
 `--user-id` is optional when the token can resolve `/Users/Me` (user session). API-key mode may omit it if the server accepts `/Items` without `userId`.
+
+## Run (local database)
+
+No server and no token. The database is opened read-only. `--root` must be the Windows path prefix stored in that database, not a different folder that happens to hold the same files.
+
+```powershell
+.\jellyfin-loudness-exporter.exe --database .\jellyfin.db --root "music=C:\Music" --output .\loudness.json --lufs-reference-hint
+```
 
 ## Self-test
 

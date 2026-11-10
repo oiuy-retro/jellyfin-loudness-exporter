@@ -9,17 +9,20 @@ internal sealed class ExportBuilder
     private readonly bool _partial;
     private readonly string? _serverVersion; // null => omit field
     private readonly bool _includeLufsReferenceHint;
+    private readonly string _sourceKind;
 
     public ExportBuilder(
         List<RootMapping> roots,
         bool partial,
         string? serverVersion,
-        bool includeLufsReferenceHint)
+        bool includeLufsReferenceHint,
+        string sourceKind = "jellyfin-api")
     {
         _roots = roots;
         _partial = partial;
         _serverVersion = serverVersion;
         _includeLufsReferenceHint = includeLufsReferenceHint;
+        _sourceKind = sourceKind;
     }
 
     public ExportBuildResult Build(IReadOnlyList<SourceItem> items)
@@ -156,7 +159,7 @@ internal sealed class ExportBuilder
             },
             Source = new ExportSource
             {
-                Kind = "jellyfin-api",
+                Kind = _sourceKind,
                 GainOrigin = "lufs-or-replaygain-unspecified",
                 ServerVersion = _serverVersion,
                 GainUnits = "dB",

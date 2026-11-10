@@ -50,6 +50,7 @@ internal static class SelfTest
         failed += Check("perf_100k", () => CasePerf100k());
         failed += Check("fixture_markers", () => CaseFixtureMarkers(fixturesDir));
         failed += Check("expected_normal_canonical", () => CaseExpectedNormalCanonical(fixturesDir));
+        failed += Check("database_lufs", () => CaseDatabaseLufs());
 
         if (failed == 0)
         {
@@ -532,5 +533,60 @@ internal static class SelfTest
         var (ver, items) = OfflineItemsReader.Read(Path.Combine(fixturesDir, "input-normal.json"));
         var doc = new ExportBuilder(MusicRoot(), false, ver, true).Build(items).Document!;
         ContractAssertions.CompareAllStableFields(doc, Path.Combine(fixturesDir, "expected-normal.json"));
+    }
+
+    private static void CaseDatabaseLufs()
+    {
+        var dir = Directory.CreateTempSubdirectory("jle-db-");
+        try
+        {
+            var dbPath = Path.Combine(dir.FullName, "fixture.db");
+            JellyfinDatabaseReader.CreateFixture(dbPath, """
+                CREATE TABLE BaseItems (
+                  Id TEXT, ParentId TEXT, Type TEXT, Path TEXT, LUFS REAL, NormalizationGain REAL
+                );
+                INSERT INTO BaseItems VALUES
+                  ('a1', NULL, 'MediaBrowser.Controller.Entities.Audio.MusicAlbum', 'C:\Music\Album', -14.0, NULL),
+                  ('t1', 'a1', 'MediaBrowser.Controller.Entities.Audio.Audio', 'C:\Music\Album\01.flac', -16.0, 9.0),
+                  ('disc', 'a2', 'MediaBrowser.Controller.Entities.Folder', 'C:\Music\Other\CD1', NULL, NULL),
+                  ('a2', NULL, 'MusicAlbum', 'C:\Music\Other', NULL, 0.5),
+                  ('t2', 'disc', 'Audio', 'C:\Music\Other\CD1\02.flac', NULL, 1.25),
+                  ('mov', NULL, 'MediaBrowser.Controller.Entities.Movie', 'C:\Music\movie.mkv', -10.0, NULL);
+                """);
+            var written = File.GetLastWriteTimeUtc(dbPath);
+            var items = JellyfinDatabaseReader.Read(dbPath);
+            if (File.GetLastWriteTimeUtc(dbPath) != written) throw new Exception("database was written");
+            if (items.Count != 2) throw new Exception("count " + items.Count.ToString(CultureInfo.InvariantCulture));
+
+            var t1 = items.Single(i => i.Id == "t1");
+            if (t1.NormalizationGain != -2d || t1.AlbumNormalizationGain != -4d || t1.AlbumId != "a1")
+                throw new Exception("lufs gain");
+            var t2 = items.Single(i => i.Id == "t2");
+            if (t2.NormalizationGain != 1.25d || t2.AlbumNormalizationGain != 0.5d || t2.AlbumId != "a2")
+                throw new Exception("stored gain");
+
+            var doc = new ExportBuilder(MusicRoot(), false, null, true, "jellyfin-database").Build(items).Document
+                ?? throw new Exception("null");
+            if (doc.Source.Kind != "jellyfin-database") throw new Exception("kind");
+            if (doc.Tracks.Count != 2) throw new Exception("exported");
+            if (doc.Tracks.Single(t => t.SourceItemId == "t1").TrackGainDb != -2d) throw new Exception("track db");
+            if (doc.Tracks.Single(t => t.SourceItemId == "t1").AlbumGainDb != -4d) throw new Exception("album db");
+
+            var missing = Path.Combine(dir.FullName, "missing.db");
+            try
+            {
+                JellyfinDatabaseReader.Read(missing);
+                throw new Exception("expected open failure");
+            }
+            catch (SafeErrorException ex) when (ex.Code == "database_open")
+            {
+            }
+
+            if (File.Exists(missing)) throw new Exception("created missing database");
+        }
+        finally
+        {
+            dir.Delete(recursive: true);
+        }
     }
 }
