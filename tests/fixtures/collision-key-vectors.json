@@ -1,0 +1,106 @@
+{
+  "SYNTHETIC": true,
+  "algorithm": "jf-ck-v1",
+  "caseFold": "unicode-15.1-full-C+F-non-Turkic",
+  "nfc": "Unicode NFC as produced by Python unicodedata (same algorithm family as .NET FormC for these BMP/supplementary samples; runtime NFC still not a pinned cross-platform guarantee for all code points)",
+  "vectors": [
+    {
+      "name": "ascii_case",
+      "rootId": "music",
+      "relativePath": "Artist/Song.flac",
+      "note": "SYNTHETIC",
+      "expectedCollisionKey": "music\u001fartist/song.flac"
+    },
+    {
+      "name": "ascii_upper",
+      "rootId": "music",
+      "relativePath": "ARTIST/SONG.flac",
+      "note": "SYNTHETIC",
+      "expectedCollisionKey": "music\u001fartist/song.flac"
+    },
+    {
+      "name": "strasse",
+      "rootId": "music",
+      "relativePath": "Straße/a.flac",
+      "note": "SYNTHETIC",
+      "expectedCollisionKey": "music\u001fstrasse/a.flac"
+    },
+    {
+      "name": "STRASSE",
+      "rootId": "music",
+      "relativePath": "STRASSE/a.flac",
+      "note": "SYNTHETIC",
+      "expectedCollisionKey": "music\u001fstrasse/a.flac"
+    },
+    {
+      "name": "final_sigma",
+      "rootId": "music",
+      "relativePath": "ς.flac",
+      "note": "SYNTHETIC",
+      "expectedCollisionKey": "music\u001fσ.flac"
+    },
+    {
+      "name": "capital_sigma",
+      "rootId": "music",
+      "relativePath": "Σ.flac",
+      "note": "SYNTHETIC",
+      "expectedCollisionKey": "music\u001fσ.flac"
+    },
+    {
+      "name": "nfc_cafe",
+      "rootId": "music",
+      "relativePath": "Café/x.flac",
+      "note": "SYNTHETIC",
+      "expectedCollisionKey": "music\u001fcafé/x.flac"
+    },
+    {
+      "name": "nfd_cafe",
+      "rootId": "music",
+      "relativePath": "Café/x.flac",
+      "note": "SYNTHETIC",
+      "expectedCollisionKey": "music\u001fcafé/x.flac"
+    },
+    {
+      "name": "root_Music_vs_music_differs",
+      "rootId": "Music",
+      "relativePath": "a.flac",
+      "note": "SYNTHETIC rootId ordinal",
+      "expectedCollisionKey": "Music\u001fa.flac"
+    },
+    {
+      "name": "turkish_I_non_turkic",
+      "rootId": "music",
+      "relativePath": "I/a.flac",
+      "note": "SYNTHETIC",
+      "expectedCollisionKey": "music\u001fi/a.flac"
+    },
+    {
+      "name": "deseret_supplementary",
+      "rootId": "music",
+      "relativePath": "𐐀/a.flac",
+      "note": "SYNTHETIC",
+      "expectedCollisionKey": "music\u001f𐐨/a.flac"
+    },
+    {
+      "name": "no_post_fold_nfc",
+      "rootId": "music",
+      "relativePath": "ǰ.flac",
+      "expectedCollisionKey": "music\u001fǰ.flac",
+      "note": "SYNTHETIC NFC before fold only"
+    },
+    {
+      "name": "dotted_I_exact",
+      "rootId": "music",
+      "relativePath": "İ.flac",
+      "expectedCollisionKey": "music\u001fi̇.flac",
+      "note": "SYNTHETIC non-Turkic full fold"
+    },
+    {
+      "name": "cherokee_fold_uppercase",
+      "rootId": "music",
+      "relativePath": "ꭰ.flac",
+      "expectedCollisionKey": "music\u001fᎠ.flac",
+      "note": "SYNTHETIC full fold is not lowercase"
+    }
+  ]
+}

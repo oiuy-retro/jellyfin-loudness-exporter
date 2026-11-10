@@ -1,0 +1,15 @@
+{
+  "serverVersion": "10.11.0-SYNTHETIC",
+  "SYNTHETIC": true,
+  "futureField": { "ignored": true },
+  "items": [
+    {
+      "Id": "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+      "Path": "C:\\Music\\A\\t.flac",
+      "NormalizationGain": -2.0,
+      "measuredLufs": -16.5,
+      "truePeakDbtp": -1.0,
+      "extraClientNote": "SYNTHETIC future unknown field ignored"
+    }
+  ]
+}

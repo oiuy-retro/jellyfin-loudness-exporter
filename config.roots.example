@@ -1,0 +1,4 @@
+# Example only — copy locally, do not commit real paths.
+# Pass roots on the CLI instead of storing secrets:
+#   --root music=C:\Music
+#   --root podcasts=D:\Podcasts

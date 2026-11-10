@@ -1,0 +1,58 @@
+{
+  "format": "jellyfin-loudness-export",
+  "schemaVersion": 1,
+  "exportedAt": "2026-11-08T00:00:00Z",
+  "collisionKeyAlgorithm": "jf-ck-v1",
+  "collisionKey": {
+    "caseFold": "unicode-15.1-full-C+F-non-Turkic",
+    "nfc": "runtime-dotnet-Normalize-FormC",
+    "rootId": "ordinal-exact",
+    "relativePath": "NFC(runtime) then unicode-15.1 full C+F case fold; stored relativePath unchanged"
+  },
+  "source": {
+    "kind": "jellyfin-api",
+    "gainOrigin": "lufs-or-replaygain-unspecified",
+    "serverVersion": "10.11.0-SYNTHETIC",
+    "gainUnits": "dB",
+    "lufsDerivedReferenceLufs": -18
+  },
+  "roots": [
+    {
+      "id": "music"
+    }
+  ],
+  "tracks": [
+    {
+      "rootId": "music",
+      "relativePath": "d.flac",
+      "sourceItemId": "good",
+      "trackGainDb": 1
+    }
+  ],
+  "coverage": {
+    "partial": true,
+    "itemsSeen": 4,
+    "entriesExported": 1,
+    "missingTrackGain": 0,
+    "missingAlbumGain": 1,
+    "missingBothGains": 0,
+    "unmatched": 0,
+    "collisions": 0,
+    "outOfRangeGains": 0,
+    "rejected": 3,
+    "errors": [
+      {
+        "code": "invalid_gain_type",
+        "sourceItemId": "bool"
+      },
+      {
+        "code": "invalid_gain_type",
+        "sourceItemId": "string"
+      },
+      {
+        "code": "nonfinite_gain",
+        "sourceItemId": "nan"
+      }
+    ]
+  }
+}
