@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.0 — 2026-11-09
 
 - Read loudness from a local Jellyfin database with `--database`. The file is opened read-only. Gain is `-18` minus `LUFS` when LUFS is set, otherwise the stored normalization gain. Album gain comes from the parent album.
 - MIT license (Copyright 2026 oiuy-retro).

@@ -4,6 +4,8 @@ Command-line tool that reads Jellyfin audio loudness fields (or an offline fixtu
 
 This is not affiliated with the Jellyfin project. Stock Jellyfin has no native import for this file format; none is promised.
 
+A built copy is [`jellyfin-loudness-exporter.exe`](https://github.com/oiuy-retro/jellyfin-loudness-exporter/releases/latest/download/jellyfin-loudness-exporter.exe) on the [latest release](https://github.com/oiuy-retro/jellyfin-loudness-exporter/releases/latest).
+
 ## What it does
 
 - Queries Jellyfin `GET /Items` for `Audio` with `fields=Path`, reads a local `jellyfin.db` read-only, or reads offline items JSON under `tests/fixtures/`.
@@ -19,7 +21,7 @@ This is not affiliated with the Jellyfin project. Stock Jellyfin has no native i
 - Export omits server URL, credentials, usernames, and absolute roots. Relative paths can still reveal structure.
 - Prefer `https`. `--allow-http` prints an explicit warning. Redirects are refused. Base URLs must not contain userinfo, query, or fragment; a missing trailing slash on an app prefix such as `/jellyfin` is normalized.
 - Errors print safe category codes only (no roots/URLs/tokens).
-- Windows execution and live Jellyfin servers are **not** verified by automated tests here.
+- Automated tests do not open a live Jellyfin server. The published Windows executable's self-test is run before a release.
 - Each HTTP request has a two-minute header-and-body deadline and a 64 MiB response cap. Missing/invalid/changed totals abort instead of claiming a complete export. Avoid library changes while exporting; count checks are not a server-side snapshot.
 - Choose an output directory you control; do not use a directory writable by untrusted users. Keep the adjacent license notices when distributing builds.
 - Exporter-only v1 does not implement Android importing or scanning. Reserved Android fields are not a frozen scanner contract.
@@ -64,7 +66,7 @@ dotnet run --project src/JellyfinLoudnessExporter -c Release -- --selftest
 
 Fixtures live in `tests/fixtures/` (all marked SYNTHETIC).
 
-Tested with .NET SDK `10.0.402` offline self-tests only. Windows hosts and real Jellyfin servers are not verified.
+Tested with .NET SDK 10. The release executable is a Windows build and its self-test passes there. Automated tests do not open a live Jellyfin server.
 
 ## Build
 
