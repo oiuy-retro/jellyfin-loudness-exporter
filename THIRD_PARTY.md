@@ -7,4 +7,11 @@
 
 No other third-party NuGet packages are referenced.
 
+The audio test tones in `tests/fixtures/audio/` were generated for this project
+with FFmpeg 7.1.5 (Debian package `7:7.1.5-0+deb13u1`) and the encoders it
+links (LAME 3.100, libopus 1.5.2, libvorbis 1.3.7, FFmpeg's native FLAC and AAC
+encoders). They contain only sine tones and synthetic tag text produced by
+`tests/tools/make_audio_fixtures.py`. No FFmpeg, LAME, Opus or Vorbis code or
+binaries are included in this repository or in the build output.
+
 Jellyfin is not redistributed. The exporter only documents a read-only HTTP client workflow against a Jellyfin server API.

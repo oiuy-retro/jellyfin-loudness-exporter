@@ -8,6 +8,7 @@ Jellyfin Loudness Exporter — portable loudness JSON from Jellyfin or offline f
 
 Usage:
   jellyfin-loudness-exporter --selftest [--fixtures <dir>]
+  jellyfin-loudness-exporter --audio-hash-file <file> [<file> ...]
   jellyfin-loudness-exporter --offline <items.json> --root id=WindowsPath [--root ...] --output <out.json> [options]
   jellyfin-loudness-exporter --database <jellyfin.db> --root id=WindowsPath [--root ...] --output <out.json> [options]
   jellyfin-loudness-exporter --api --base-url <url> [--user-id <guid>] --root id=WindowsPath --output <out.json> [options]
@@ -18,12 +19,16 @@ Options:
   --server-version <text>   Set source.serverVersion when known (omit if unknown)
   --lufs-reference-hint     Include informational source.lufsDerivedReferenceLufs=-18
   --allow-http              Allow http:// base URL (prints a warning). Prefer https.
+  --audio-hash              Read each exported track's file (read-only) and add audioSha256
+                            (jle-audio-v1, tags and cover art excluded). Files that cannot be
+                            read or parsed get no hash and are counted in coverage.hashUnavailable.
   --user-id <guid>          Optional for API-key mode; required when /Users/Me is unavailable
   --help                    Show help
 
 Windows PowerShell examples (quote roots):
   .\jellyfin-loudness-exporter.exe --offline .\fixtures\input-normal.json --root "music=C:\Music" --output .\out.json --lufs-reference-hint
   .\jellyfin-loudness-exporter.exe --database .\jellyfin.db --root "music=C:\Music" --output .\out.json --lufs-reference-hint
+  .\jellyfin-loudness-exporter.exe --database .\jellyfin.db --root "music=C:\Music" --output .\out.json --audio-hash
   .\jellyfin-loudness-exporter.exe --api --base-url "https://jellyfin.example/jellyfin" --user-id "..." --root "music=C:\Music" --output .\out.json
 
 Security: token from masked prompt only (never args/config/log/disk). No credentials in URLs. Redirects refused. Errors are safe categories only.
@@ -38,6 +43,20 @@ if (args.Length == 0 || args.Contains("--help", StringComparer.OrdinalIgnoreCase
 
 try
 {
+    if (string.Equals(args[0], "--audio-hash-file", StringComparison.OrdinalIgnoreCase))
+    {
+        // Diagnostic: print the jle-audio-v1 hash of each named file, one line per file, in order.
+        // Output is the 64-hex hash or "none:<reason>"; file paths are not echoed.
+        if (args.Length < 2) return Usage();
+        foreach (var file in args.Skip(1))
+        {
+            var r = AudioHasher.HashFile(file);
+            Console.WriteLine(r.Sha256 ?? "none:" + r.Status.ToString().ToLowerInvariant());
+        }
+
+        return 0;
+    }
+
     if (args.Contains("--selftest", StringComparer.OrdinalIgnoreCase))
     {
         var fixtures = GetOpt(args, "--fixtures") ?? FindDefaultFixtures();
@@ -80,6 +99,7 @@ try
     var lufsHint = args.Contains("--lufs-reference-hint", StringComparer.OrdinalIgnoreCase);
     var allowHttp = args.Contains("--allow-http", StringComparer.OrdinalIgnoreCase);
     var serverVersionOverride = GetOpt(args, "--server-version");
+    var audioHash = args.Contains("--audio-hash", StringComparer.OrdinalIgnoreCase);
 
     string? serverVersion;
     List<SourceItem> items;
@@ -130,7 +150,13 @@ try
         }
     }
 
-    var builder = new ExportBuilder(roots, partial, serverVersion, lufsHint, sourceKind);
+    var builder = new ExportBuilder(roots, partial, serverVersion, lufsHint, sourceKind,
+        audioHash ? AudioHasher.HashFile : null,
+        audioHash ? static (done, total) =>
+        {
+            if (done % 500 == 0 || done == total)
+                Console.Error.WriteLine($"audio_hash_progress:{done}/{total}");
+        } : null);
     var result = builder.Build(items);
     if (!result.Success || result.Document is null)
     {
@@ -138,6 +164,15 @@ try
         Console.Error.WriteLine(
             $"coverage_summary:seen={result.Coverage.ItemsSeen};unmatched={result.Coverage.Unmatched};collisions={result.Coverage.Collisions};rejected={result.Coverage.Rejected}");
         return 1;
+    }
+
+    if (audioHash)
+    {
+        var by = result.HashUnavailableByStatus;
+        Console.Error.WriteLine(
+            $"audio_hash_summary:hashed={result.Document.Coverage.Hashed};unavailable={result.Document.Coverage.HashUnavailable};" +
+            $"unsupported={by.GetValueOrDefault(AudioHashStatus.Unsupported)};malformed={by.GetValueOrDefault(AudioHashStatus.Malformed)};" +
+            $"unreadable={by.GetValueOrDefault(AudioHashStatus.Unreadable)}");
     }
 
     ExportWriter.WriteAtomic(result.Document, output, force);

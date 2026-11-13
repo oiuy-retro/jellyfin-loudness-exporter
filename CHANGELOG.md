@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Optional `--audio-hash`: adds a per-track `audioSha256` (algorithm `jle-audio-v1`, recorded in the new top-level `audioHashAlgorithm`) computed from the audio payload of FLAC, MP3, MP4/M4A, Ogg Vorbis, Ogg Opus and WAV files, excluding tags and cover art. Files are opened read-only and streamed. This is an optional addition to schemaVersion 1; `relativePath` stays required.
+- `coverage.hashed` and `coverage.hashUnavailable` are written when hashing is on. Unsupported, malformed or unreadable files get no hash and do not block the export.
+- `--audio-hash-file` prints the hash of individual files.
+- Frozen hashing rules in docs/FORMAT.md, an independent Python reference in `tests/tools/jle_audio_hash.py`, and SYNTHETIC self-generated test tones with expected hashes in `tests/fixtures/audio/`.
+
 ## 0.1.0 — 2026-11-09
 
 - Read loudness from a local Jellyfin database with `--database`. The file is opened read-only. Gain is `-18` minus `LUFS` when LUFS is set, otherwise the stored normalization gain. Album gain comes from the parent album.

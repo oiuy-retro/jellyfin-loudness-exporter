@@ -10,14 +10,20 @@ internal sealed class ExportBuilder
     private readonly string? _serverVersion; // null => omit field
     private readonly bool _includeLufsReferenceHint;
     private readonly string _sourceKind;
+    private readonly Func<string, AudioHashResult>? _audioHasher;
+    private readonly Action<int, int>? _hashProgress;
 
     public ExportBuilder(
         List<RootMapping> roots,
         bool partial,
         string? serverVersion,
         bool includeLufsReferenceHint,
-        string sourceKind = "jellyfin-api")
+        string sourceKind = "jellyfin-api",
+        Func<string, AudioHashResult>? audioHasher = null,
+        Action<int, int>? hashProgress = null)
     {
+        _audioHasher = audioHasher;
+        _hashProgress = hashProgress;
         _roots = roots;
         _partial = partial;
         _serverVersion = serverVersion;
@@ -144,6 +150,11 @@ internal sealed class ExportBuilder
             }
         }
 
+        var ordered = exported
+            .OrderBy(t => t.RootId, StringComparer.Ordinal)
+            .ThenBy(t => t.RelativePath, StringComparer.Ordinal)
+            .ToList();
+
         var doc = new ExportDocument
         {
             Format = "jellyfin-loudness-export",
@@ -166,9 +177,7 @@ internal sealed class ExportBuilder
                 LufsDerivedReferenceLufs = _includeLufsReferenceHint ? InformationalLufsReference : null
             },
             Roots = _roots.Select(r => new ExportRoot { Id = r.Id }).ToList(),
-            Tracks = exported
-                .OrderBy(t => t.RootId, StringComparer.Ordinal)
-                .ThenBy(t => t.RelativePath, StringComparer.Ordinal)
+            Tracks = ordered
                 .Select(t => new ExportTrack
                 {
                     RootId = t.RootId,
@@ -185,8 +194,45 @@ internal sealed class ExportBuilder
         coverage.EntriesExported = doc.Tracks.Count;
         coverage.Partial = _partial;
 
-        return ExportBuildResult.Ok(doc);
+        var hashStats = new Dictionary<AudioHashStatus, int>();
+        if (_audioHasher is not null)
+        {
+            // Opt-in (--audio-hash): read each exported track's on-disk file at the
+            // source item's path. Failures omit audioSha256 and never block the export.
+            doc.AudioHashAlgorithm = AudioHasher.AlgorithmId;
+            int hashed = 0, unavailable = 0, done = 0;
+            for (var i = 0; i < doc.Tracks.Count; i++)
+            {
+                var t = doc.Tracks[i];
+                AudioHashResult r;
+                try { r = _audioHasher(ordered[i].Item.Path); }
+                catch (Exception) { r = AudioHashResult.None(AudioHashStatus.Unreadable); }
+                if (r.Status == AudioHashStatus.Ok && r.Sha256 is { Length: 64 } hex && IsLowerHex(hex))
+                {
+                    t.AudioSha256 = hex;
+                    hashed++;
+                }
+                else
+                {
+                    unavailable++;
+                    var status = r.Status == AudioHashStatus.Ok ? AudioHashStatus.Malformed : r.Status;
+                    hashStats[status] = hashStats.GetValueOrDefault(status) + 1;
+                }
+
+                done++;
+                _hashProgress?.Invoke(done, doc.Tracks.Count);
+            }
+
+            coverage.Hashed = hashed;
+            coverage.HashUnavailable = unavailable;
+        }
+
+        var ok = ExportBuildResult.Ok(doc);
+        ok.HashUnavailableByStatus = hashStats;
+        return ok;
     }
+
+    private static bool IsLowerHex(string s) => s.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');
 
     private static void AddError(ExportCoverage coverage, string code, string? sourceItemId)
     {
@@ -211,6 +257,7 @@ internal sealed class ExportBuildResult
     public ExportDocument? Document { get; private init; }
     public ExportCoverage Coverage { get; private init; } = new();
     public string? FailureCode { get; private init; }
+    public IReadOnlyDictionary<AudioHashStatus, int> HashUnavailableByStatus { get; set; } = new Dictionary<AudioHashStatus, int>();
 
     public static ExportBuildResult Ok(ExportDocument document) => new()
     {

@@ -1,0 +1,8 @@
+# Audio test fixtures are hashed byte-for-byte; never convert line endings.
+tests/fixtures/audio/*.flac binary
+tests/fixtures/audio/*.mp3 binary
+tests/fixtures/audio/*.opus binary
+tests/fixtures/audio/*.ogg binary
+tests/fixtures/audio/*.m4a binary
+tests/fixtures/audio/*.wav binary
+tests/fixtures/audio/*.bin binary
