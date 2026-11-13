@@ -24,6 +24,22 @@ Or after build:
 dotnet src/JellyfinLoudnessExporter/bin/Release/net10.0/jellyfin-loudness-exporter.dll --selftest
 ```
 
+## Audio hash cross-check (optional)
+
+The self-test compares the exporter's `jle-audio-v1` results with
+`tests/fixtures/audio/vectors.json`. To compare against the independent Python
+reference (Python 3.10 or later, standard library only), including a few
+thousand mutated copies of the fixtures, after a build:
+
+```bash
+python3 tests/tools/cross_check.py src/JellyfinLoudnessExporter/bin/Release/net10.0/jellyfin-loudness-exporter.dll
+```
+
+`tests/tools/make_audio_fixtures.py` documents how the fixture tones were made.
+It needs `ffmpeg` and rewrites `tests/fixtures/audio/`; another FFmpeg build may
+produce different bytes, so do not run it unless you mean to replace the
+fixtures and their expected hashes.
+
 ## Optional Windows self-contained publish
 
 ```bash

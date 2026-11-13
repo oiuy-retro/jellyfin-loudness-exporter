@@ -51,6 +51,7 @@ internal static class SelfTest
         failed += Check("fixture_markers", () => CaseFixtureMarkers(fixturesDir));
         failed += Check("expected_normal_canonical", () => CaseExpectedNormalCanonical(fixturesDir));
         failed += Check("database_lufs", () => CaseDatabaseLufs());
+        failed += AudioHashTests.Run(fixturesDir);
 
         if (failed == 0)
         {

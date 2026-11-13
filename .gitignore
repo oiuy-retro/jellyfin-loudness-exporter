@@ -19,3 +19,5 @@ secrets/
 .env.*
 *.token
 local.settings.json
+__pycache__/
+*.pyc

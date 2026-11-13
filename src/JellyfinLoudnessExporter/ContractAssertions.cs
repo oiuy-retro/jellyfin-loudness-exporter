@@ -25,12 +25,19 @@ internal static class ContractAssertions
         Require(Str(ck, "rootId") == "ordinal-exact", "rootId rules");
         Str(ck, "relativePath");
         var source = Obj(r, "source");
-        Require(Str(source, "kind") == "jellyfin-api", "source.kind");
+        Require(Str(source, "kind") is "jellyfin-api" or "jellyfin-database", "source.kind");
         Require(Str(source, "gainOrigin") == "lufs-or-replaygain-unspecified", "gainOrigin");
         Require(Str(source, "gainUnits") == "dB", "gainUnits");
         if (source.TryGetProperty("serverVersion", out _)) Str(source, "serverVersion");
         if (source.TryGetProperty("lufsDerivedReferenceLufs", out var hint))
             Require(Number(hint) == -18, "lufsDerivedReferenceLufs");
+
+        string? hashAlgorithm = null;
+        if (r.TryGetProperty("audioHashAlgorithm", out _))
+        {
+            hashAlgorithm = Str(r, "audioHashAlgorithm");
+            Require(hashAlgorithm == AudioHasher.AlgorithmId, "audioHashAlgorithm");
+        }
 
         var roots = Arr(r, "roots");
         Require(roots.GetArrayLength() > 0, "empty roots");
@@ -44,7 +51,7 @@ internal static class ContractAssertions
 
         var tracks = Arr(r, "tracks");
         var keys = new HashSet<string>(StringComparer.Ordinal);
-        var missingTrack = 0; var missingAlbum = 0; var missingBoth = 0; var outOfRange = 0;
+        var missingTrack = 0; var missingAlbum = 0; var missingBoth = 0; var outOfRange = 0; var hashedTracks = 0;
         foreach (var track in tracks.EnumerateArray())
         {
             var rootId = Str(track, "rootId");
@@ -56,6 +63,13 @@ internal static class ContractAssertions
             if (track.TryGetProperty("sourceAlbumId", out _)) Str(track, "sourceAlbumId");
             double? tg = track.TryGetProperty("trackGainDb", out var t) ? Number(t) : null;
             double? ag = track.TryGetProperty("albumGainDb", out var a) ? Number(a) : null;
+            if (track.TryGetProperty("audioSha256", out _))
+            {
+                var hex = Str(track, "audioSha256");
+                Require(hashAlgorithm is not null, "audioSha256 without audioHashAlgorithm");
+                Require(hex.Length == 64 && hex.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f'), "audioSha256");
+                hashedTracks++;
+            }
             if (tg is null) missingTrack++;
             if (ag is null) missingAlbum++;
             if (tg is null && ag is null) missingBoth++;
@@ -75,6 +89,15 @@ internal static class ContractAssertions
         var rejected = Int(coverage, "rejected");
         Require((long)seen == (long)tracks.GetArrayLength() + unmatched + collisions + rejected, "coverage accounting");
         Require(Get(coverage, "partial").GetBoolean() || (unmatched == 0 && collisions == 0 && rejected == 0), "complete coverage");
+        var hasHashed = coverage.TryGetProperty("hashed", out _);
+        var hasUnavailable = coverage.TryGetProperty("hashUnavailable", out _);
+        Require(hasHashed == hasUnavailable && hasHashed == (hashAlgorithm is not null), "hash coverage fields");
+        if (hasHashed)
+        {
+            Require(Int(coverage, "hashed") == hashedTracks, "coverage.hashed");
+            Require(Int(coverage, "hashed") + Int(coverage, "hashUnavailable") == tracks.GetArrayLength(), "coverage.hashUnavailable");
+        }
+
         var errors = Arr(coverage, "errors");
         Require(errors.GetArrayLength() <= 200, "errors cap");
         foreach (var error in errors.EnumerateArray())

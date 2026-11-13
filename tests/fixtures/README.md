@@ -18,3 +18,6 @@ scanner support and are not a frozen producer schema.
 supplementary characters, full case fold, ordinal root IDs, non-Turkic dotted I,
 Cherokee, and absence of post-fold NFC. Collision keys are not playback identity.
 The malformed-NaN `.json` and `.txt` files intentionally contain invalid JSON.
+
+`audio/` holds SYNTHETIC self-generated test tones and `audio/vectors.json` for
+the `jle-audio-v1` audio hash; see `audio/README.md`.

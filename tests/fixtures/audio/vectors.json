@@ -1,0 +1,240 @@
+{
+  "note": "SYNTHETIC self-generated test tones. Expected values from tests/tools/jle_audio_hash.py.",
+  "algorithm": "jle-audio-v1",
+  "cases": [
+    {
+      "file": "flac-base.flac",
+      "group": "flac",
+      "audioSha256": "8603cc613765c51c136b6fbec22d36a3f9819b1f1160daecf97092696df93008",
+      "notes": "FLAC 0.5 s mono tone, Vorbis comment"
+    },
+    {
+      "file": "flac-retagged-cover.flac",
+      "group": "flac",
+      "audioSha256": "8603cc613765c51c136b6fbec22d36a3f9819b1f1160daecf97092696df93008",
+      "notes": "same frames, different Vorbis comment and a PICTURE block"
+    },
+    {
+      "file": "flac-id3v2-id3v1.flac",
+      "group": "flac",
+      "audioSha256": "8603cc613765c51c136b6fbec22d36a3f9819b1f1160daecf97092696df93008",
+      "notes": "flac-base with a leading ID3v2.3 tag and a trailing ID3v1 tag"
+    },
+    {
+      "file": "flac-truncated-metadata.flac",
+      "group": null,
+      "audioSha256": null,
+      "notes": "cut inside the metadata blocks"
+    },
+    {
+      "file": "mp3-mpeg1-stereo-info.mp3",
+      "group": "mp3-mpeg1-stereo",
+      "audioSha256": "0d5f868d969dc1f775b8a4f98d153a9325d9b4f8c9b360662d7747096fb7162c",
+      "notes": "MPEG-1 stereo 64 kbit/s CBR, LAME Info frame, ID3v2.4"
+    },
+    {
+      "file": "mp3-mpeg1-stereo-retagged-cover.mp3",
+      "group": "mp3-mpeg1-stereo",
+      "audioSha256": "0d5f868d969dc1f775b8a4f98d153a9325d9b4f8c9b360662d7747096fb7162c",
+      "notes": "stream copy: new Info frame, ID3v2.3 with APIC, ID3v1"
+    },
+    {
+      "file": "mp3-mpeg1-stereo-noxing-notags.mp3",
+      "group": "mp3-mpeg1-stereo",
+      "audioSha256": "0d5f868d969dc1f775b8a4f98d153a9325d9b4f8c9b360662d7747096fb7162c",
+      "notes": "same frames, no Info frame, no tags"
+    },
+    {
+      "file": "mp3-all-trailers.mp3",
+      "group": "mp3-mpeg1-stereo",
+      "audioSha256": "0d5f868d969dc1f775b8a4f98d153a9325d9b4f8c9b360662d7747096fb7162c",
+      "notes": "ID3v2.3+APIC, Lyrics3v2, APEv2 with header, TAG+, ID3v1"
+    },
+    {
+      "file": "mp3-ape-noheader-appended-id3v24.mp3",
+      "group": "mp3-mpeg1-stereo",
+      "audioSha256": "0d5f868d969dc1f775b8a4f98d153a9325d9b4f8c9b360662d7747096fb7162c",
+      "notes": "two leading ID3v2.4 (second has footer), APEv2 without header, appended ID3v2.4 with 3DI footer"
+    },
+    {
+      "file": "mp3-vbri-frame.mp3",
+      "group": "mp3-mpeg1-stereo",
+      "audioSha256": "0d5f868d969dc1f775b8a4f98d153a9325d9b4f8c9b360662d7747096fb7162c",
+      "notes": "synthetic first frame with VBRI at offset 36"
+    },
+    {
+      "file": "mp3-xing-crc-lame-offset.mp3",
+      "group": "mp3-mpeg1-stereo",
+      "audioSha256": "0d5f868d969dc1f775b8a4f98d153a9325d9b4f8c9b360662d7747096fb7162c",
+      "notes": "CRC-protected first frame, Xing at 4+32 (LAME/FFmpeg/mpg123 position)"
+    },
+    {
+      "file": "mp3-xing-crc-plus2-not-excluded.mp3",
+      "group": "mp3-xing-crc-plus2",
+      "audioSha256": "22fac235a2e40922e0764f41f63e3d1f987c1f7c4b60ef63f3b78a57cbe7a800",
+      "notes": "CRC-protected first frame, Xing only at 4+32+2: not a tag frame, hashed as audio"
+    },
+    {
+      "file": "mp3-mpeg1-mono-vbr.mp3",
+      "group": "mp3-mpeg1-mono",
+      "audioSha256": "b752eb177f89ee87da60d828b6ee2d40d2848b0b11382ff11a154ebf0470a1a1",
+      "notes": "MPEG-1 mono VBR, Xing/Info at 4+17"
+    },
+    {
+      "file": "mp3-mpeg1-mono-noxing.mp3",
+      "group": "mp3-mpeg1-mono",
+      "audioSha256": "b752eb177f89ee87da60d828b6ee2d40d2848b0b11382ff11a154ebf0470a1a1",
+      "notes": "same frames without the tag frame or tags"
+    },
+    {
+      "file": "mp3-mpeg2-mono-info.mp3",
+      "group": "mp3-mpeg2-mono",
+      "audioSha256": "eaeba23f88895415999ff36ed1aec9aa9181fa301ebf8817ba0d3598a353fbd8",
+      "notes": "MPEG-2 22.05 kHz mono, tag frame at 4+9"
+    },
+    {
+      "file": "mp3-mpeg2-mono-vbri-frame.mp3",
+      "group": "mp3-mpeg2-mono",
+      "audioSha256": "eaeba23f88895415999ff36ed1aec9aa9181fa301ebf8817ba0d3598a353fbd8",
+      "notes": "synthetic VBRI first frame (offset 36, distinct from the Xing offset 13)"
+    },
+    {
+      "file": "mp3-mpeg2-mono-noxing.mp3",
+      "group": "mp3-mpeg2-mono",
+      "audioSha256": "eaeba23f88895415999ff36ed1aec9aa9181fa301ebf8817ba0d3598a353fbd8",
+      "notes": "same frames without the tag frame"
+    },
+    {
+      "file": "mp3-mpeg25-stereo-info.mp3",
+      "group": "mp3-mpeg25-stereo",
+      "audioSha256": "f29035b10910ebe0feb22b4b30c21e9fea911c3d786c67a3b02faf294079e89c",
+      "notes": "MPEG-2.5 11.025 kHz stereo, tag frame at 4+17"
+    },
+    {
+      "file": "mp3-mpeg25-stereo-noxing.mp3",
+      "group": "mp3-mpeg25-stereo",
+      "audioSha256": "f29035b10910ebe0feb22b4b30c21e9fea911c3d786c67a3b02faf294079e89c",
+      "notes": "same frames without the tag frame"
+    },
+    {
+      "file": "mp3-truncated-first-frame.mp3",
+      "group": null,
+      "audioSha256": null,
+      "notes": "file ends inside the first frame"
+    },
+    {
+      "file": "mp3-id3v2-size-past-eof.mp3",
+      "group": null,
+      "audioSha256": null,
+      "notes": "leading ID3v2 size points past end of file"
+    },
+    {
+      "file": "mp3-apev2-size-too-large.mp3",
+      "group": null,
+      "audioSha256": null,
+      "notes": "APEv2 footer size larger than the file"
+    },
+    {
+      "file": "opus-base.opus",
+      "group": "opus",
+      "audioSha256": "fe90654c87528a32c3ea8c00457e4bade421ac41001c77bfb1df25f861af32db",
+      "notes": "Opus 1 s mono, OpusTags with title"
+    },
+    {
+      "file": "opus-retagged-cover.opus",
+      "group": "opus",
+      "audioSha256": "fe90654c87528a32c3ea8c00457e4bade421ac41001c77bfb1df25f861af32db",
+      "notes": "stream copy: different OpusTags with METADATA_BLOCK_PICTURE, different paging"
+    },
+    {
+      "file": "opus-output-gain-edited.opus",
+      "group": "opus",
+      "audioSha256": "fe90654c87528a32c3ea8c00457e4bade421ac41001c77bfb1df25f861af32db",
+      "notes": "OpusHead output gain set to +3 dB (bytes 16-17), page CRC recomputed"
+    },
+    {
+      "file": "opus-chained.opus",
+      "group": null,
+      "audioSha256": null,
+      "notes": "two logical streams concatenated (chained)"
+    },
+    {
+      "file": "opus-truncated.opus",
+      "group": null,
+      "audioSha256": null,
+      "notes": "last page cut short"
+    },
+    {
+      "file": "vorbis-base.ogg",
+      "group": "vorbis",
+      "audioSha256": "30bf81f09936ee687cbe7c763b21d9e412d37223d99d850cee58ce9efb7196d4",
+      "notes": "Vorbis 1 s mono"
+    },
+    {
+      "file": "vorbis-retagged-cover.ogg",
+      "group": "vorbis",
+      "audioSha256": "30bf81f09936ee687cbe7c763b21d9e412d37223d99d850cee58ce9efb7196d4",
+      "notes": "stream copy: different comment header with METADATA_BLOCK_PICTURE"
+    },
+    {
+      "file": "vorbis-truncated.ogg",
+      "group": null,
+      "audioSha256": null,
+      "notes": "cut in the middle of a page"
+    },
+    {
+      "file": "m4a-base.m4a",
+      "group": "m4a",
+      "audioSha256": "7325908b468b33c12b5541959c75fb536f8d4ebdb3c21ab45ee3f8d952bcc2cb",
+      "notes": "AAC-LC 1 s mono in MP4, mdat after moov is not required"
+    },
+    {
+      "file": "m4a-retagged-cover-faststart.m4a",
+      "group": "m4a",
+      "audioSha256": "7325908b468b33c12b5541959c75fb536f8d4ebdb3c21ab45ee3f8d952bcc2cb",
+      "notes": "stream copy: different ilst tags with covr, moov moved before mdat"
+    },
+    {
+      "file": "m4a-mdat-largesize.m4a",
+      "group": "m4a",
+      "audioSha256": "7325908b468b33c12b5541959c75fb536f8d4ebdb3c21ab45ee3f8d952bcc2cb",
+      "notes": "same file with free+mdat rewritten as a 64-bit largesize mdat header"
+    },
+    {
+      "file": "m4a-mdat-size0-to-eof.m4a",
+      "group": "m4a",
+      "audioSha256": "7325908b468b33c12b5541959c75fb536f8d4ebdb3c21ab45ee3f8d952bcc2cb",
+      "notes": "last-box mdat with size 0 (extends to end of file)"
+    },
+    {
+      "file": "m4a-truncated.m4a",
+      "group": null,
+      "audioSha256": null,
+      "notes": "cut short; the last box runs past end of file"
+    },
+    {
+      "file": "wav-base.wav",
+      "group": "wav",
+      "audioSha256": "74fa0a16cd66df301668dd57dd2a8f23f47f45cefcacf039205cbfbb24aad881",
+      "notes": "PCM 16-bit 8 kHz mono with LIST/INFO"
+    },
+    {
+      "file": "wav-retagged-cover.wav",
+      "group": "wav",
+      "audioSha256": "74fa0a16cd66df301668dd57dd2a8f23f47f45cefcacf039205cbfbb24aad881",
+      "notes": "same samples; odd-sized junk chunk with pad byte, id3 chunk with APIC"
+    },
+    {
+      "file": "wav-no-data-chunk.wav",
+      "group": null,
+      "audioSha256": null,
+      "notes": "RIFF/WAVE without a data chunk"
+    },
+    {
+      "file": "unsupported-text.bin",
+      "group": null,
+      "audioSha256": null,
+      "notes": "not a supported container"
+    }
+  ]
+}

@@ -19,6 +19,10 @@ internal sealed class ExportDocument
     [JsonPropertyName("collisionKey")]
     public CollisionKeyInfo CollisionKey { get; set; } = new();
 
+    [JsonPropertyName("audioHashAlgorithm")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? AudioHashAlgorithm { get; set; }
+
     [JsonPropertyName("source")]
     public ExportSource Source { get; set; } = new();
 
@@ -96,6 +100,10 @@ internal sealed class ExportTrack
     [JsonPropertyName("albumGainDb")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public double? AlbumGainDb { get; set; }
+
+    [JsonPropertyName("audioSha256")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? AudioSha256 { get; set; }
 }
 
 internal sealed class ExportCoverage
@@ -129,6 +137,14 @@ internal sealed class ExportCoverage
 
     [JsonPropertyName("rejected")]
     public int Rejected { get; set; }
+
+    [JsonPropertyName("hashed")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? Hashed { get; set; }
+
+    [JsonPropertyName("hashUnavailable")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? HashUnavailable { get; set; }
 
     [JsonPropertyName("errors")]
     public List<ExportError> Errors { get; set; } = [];
